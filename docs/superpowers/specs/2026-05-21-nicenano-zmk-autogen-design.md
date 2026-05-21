@@ -97,36 +97,45 @@ avoiding a fragile raw `&gpio0/&gpio1` port/pin table:
 ```
 kscan0: kscan_0 {
     compatible = "zmk,kscan-gpio-matrix";
-    diode-direction = "col2row";   // or row2col per options
+    diode-direction = "row2col";   // FROM options.diodeDirection (see note)
     row-gpios = <&pro_micro N (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> , ... ;
     col-gpios = <&pro_micro M GPIO_ACTIVE_HIGH> , ... ;
 };
 ```
 
 `activeMode`/`pullMode` follow the existing diode-direction logic in
-`generateDTSI`.
+`generateDTSI`. **Bug to fix:** the current Lemon `generateDTSI` emits a literal
+`diode-direction = "col2row"` regardless of `options.diodeDirection` (only the
+active/pull flags flip). The nice!nano kscan must set `diode-direction` from
+`options.diodeDirection` (lowercased). Decide during implementation whether to
+also correct the Lemon path or scope the fix to nice!nano only.
+
+### Pin map (confirmed)
+
+`&pro_micro <N>` maps directly to nice!nano label `D<N>`, per the fork's
+`app/boards/arm/nice_nano/arduino_pro_micro_pins.dtsi`. Usable indices:
+
+```
+NICENANO_PIN_ORDER = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 14, 15, 16, 18, 19, 20, 21]
+```
+
+(matches Cosmos's usable `D`-pin list; 11/12/13/17 absent). Matrix row/col GPIO
+reference these as `<&pro_micro N ...>` — no raw `&gpio0/1` port/pin table needed.
 
 ### Pin assignment (auto)
 
-A fixed ordered list of usable Cosmos nice!nano pin labels mapped to
-`&pro_micro` indices:
-
-```
-NICENANO_PIN_ORDER = [D0, D1, D2, D3, D4, D5, D6, D7, D8, D9,
-                      D10, D14, D15, D16, D18, D19, D20, D21]
-```
-
 Assignment order, sliced to the matrix's actual counts:
-1. If a trackpad is present, reserve I2C SDA/SCL + reset + rdy (4 pins) first.
-2. Rows = next `rowCount` pins.
+1. If a trackpad is present, **I2C SDA/SCL are fixed to the board's
+   `pro_micro_i2c` default pins** (not drawn from the pool — see trackpad
+   section) and only **reset + rdy (2 pins)** are reserved from the pool.
+2. Rows = next `rowCount` pins from `NICENANO_PIN_ORDER`.
 3. Columns = next `colCount` pins.
 
-The exact label→pro_micro index numbers are verified during implementation
-against ZMK's `nice_nano_v2.dts` + `arduino_pro_micro` connector. The chosen
-assignment is emitted as a comment block in the generated `.dtsi` and documented
-in the firmware docs, so the user knows where to solder. For split, both halves
-use the same per-side assignment; the right half's columns are shifted by the
-matrix transform `colOffset`.
+The chosen assignment is emitted as a comment block in the generated `.dtsi` and
+documented in the firmware docs, so the user knows where to solder. For split,
+both halves use the same per-side assignment; the right half's columns are
+shifted by the matrix transform `colOffset` — **but see the split-encoding
+verification gate below before trusting that offset.**
 
 ### conf
 
@@ -160,10 +169,15 @@ projects:
     revision: main      # pin to a specific SHA during implementation
 ```
 
-**Shield overlay** (on the side that carries the trackpad) adds an I2C node +
-input listener. Unlike the reference dev shield (which uses the DK's
-`arduino_i2c` / `arduino_header`), nice!nano has no arduino headers, so we define
-an I2C bus on reserved pro_micro pins and reference them for reset/rdy:
+**Shield overlay** (on the side that carries the trackpad) adds an input
+listener + the trackpad node on the board's I2C bus. The reference dev shield
+uses the DK's `arduino_i2c` / `arduino_header`, which nice!nano lacks. Instead
+use the board's `pro_micro_i2c` alias (`= &i2c0`, defined in
+`arduino_pro_micro_pins.dtsi`): its SDA/SCL pinctrl defaults are already set by
+the board, so **no custom pinctrl block is needed**. The user solders SDA/SCL to
+those default pins (verify exact pins in `nice_nano-pinctrl.dtsi` during impl;
+they are documented + emitted as a comment). `reset-gpios`/`rdy-gpios` are plain
+GPIO and use the `&pro_micro` nexus (2 pins reserved from the pool):
 
 ```
 trackpad_input: trackpad_input {
@@ -171,13 +185,13 @@ trackpad_input: trackpad_input {
     device = <&trackpad>;
 };
 
-&pro_micro_i2c {           // or an i2c node bound to the reserved SDA/SCL pins
+&pro_micro_i2c {           // = &i2c0; SDA/SCL on board-default pinctrl pins
     status = "okay";
     trackpad: iqs5xx@74 {
         compatible = "azoteq,iqs5xx";
         reg = <0x74>;
-        reset-gpios = <&pro_micro R GPIO_ACTIVE_LOW>;
-        rdy-gpios   = <&pro_micro Y GPIO_ACTIVE_HIGH>;
+        reset-gpios = <&pro_micro R GPIO_ACTIVE_LOW>;   // R from pin pool
+        rdy-gpios   = <&pro_micro Y GPIO_ACTIVE_HIGH>;   // Y from pin pool
         one-finger-tap;
         press-and-hold;
         two-finger-tap;
@@ -188,9 +202,15 @@ trackpad_input: trackpad_input {
 };
 ```
 
-`zephyr/module.yml` `build.depends` and the conf flags above complete the wiring.
-The trackpad is attached to the side whose Cosmos config contains a
-`trackpad-azoteq` key; for split, only that side's overlay/conf gets the node.
+`zephyr/module.yml` and the conf flags above complete the wiring. The trackpad
+attaches to the side whose Cosmos config contains a `trackpad-azoteq` key; for
+split, only that side's overlay/conf gets the node.
+
+**Split constraint (v1):** a pointing device on the *peripheral* half requires
+ZMK split input forwarding over BLE, which the reference shields don't exercise.
+For v1, **require the trackpad half to be the central side** and surface this in
+the UI / errors (`zmkErrors`) when the config puts the trackpad on the
+non-central half. Peripheral-side pointing relay is a follow-up.
 
 **Honesty note:** built firmware cannot be compiled or flashed inside this repo.
 Verification is limited to structural correctness (valid DTS/YAML, expected
@@ -231,6 +251,29 @@ Same layout as Lemon, minus the custom board overlay:
     <folder>_left/right(.overlay/.conf)  or unibody variants
 ```
 
+## Split matrix-encoding verification gate (do first)
+
+The matrix `Map<CuttleKey,[row,col]>` is built by manual user entry in
+`ViewerPea.svelte` (`:70`) with **no automatic column offset**. Lemon hardcodes
+`columns=14, rows=7` and a right-side `col-offset=7`; `isBootmagic` (`:94`)
+accepts right `(0,0)` for ZMK, which hints right columns may be entered *local*
+(0-based per side). If right columns are local, the shared `default_transform`
+map would have colliding `RC(r,c)` entries between halves — so either the map is
+generated with the offset baked in, or right entries are actually global.
+
+**Resolve this before writing the generic dim/offset logic.** Concrete experiment:
+generate a real Lemon **split** ZMK zip from a known config, open
+`<folder>.dtsi` + `<folder>_right.overlay`, and trace one right-side key from its
+matrix value → transform `map` entry → `col-offset` → bindings index. Document
+whether values are local or global. Then:
+- if **global**: `columns = max(col)+1`, no per-side offset in the map; the right
+  overlay `col-offset` stays as a no-op or is dropped.
+- if **local**: derive `columns = leftCols + rightCols`, keep `col-offset =
+  leftCols`, and the map must add the offset for right keys.
+
+Getting this wrong yields a keyboard whose right half types the wrong keys, so it
+gates the dim-derivation work in step 2 below.
+
 ## Verification
 
 1. **Snapshot test first**: capture current Lemon ZMK output into a `bun:test`
@@ -238,27 +281,34 @@ Same layout as Lemon, minus the custom board overlay:
    catch regressions in the extract-to-profile step.
 2. **nice!nano tests**: small split + unibody fixtures →
    - `kscan-gpio-matrix` present, `&pro_micro` refs for rows and cols,
-   - matrix transform dims derived correctly,
+   - `diode-direction` reflects `options.diodeDirection` (not hardcoded),
+   - matrix transform dims derived correctly (per the encoding gate above),
    - no `zmk,gpio-595` / VIK / `cosmos_lemon_wireless`,
    - `board: nice_nano_v2` in build.yaml,
-   - trackpad fixture → `iqs5xx@74` node, input listener, conf flags, west project.
+   - trackpad fixture → `pro_micro_i2c` `iqs5xx@74` node, input listener,
+     reset/rdy on `&pro_micro`, conf flags, azoteq west project,
+   - trackpad-on-peripheral fixture → `zmkErrors` warns to make that side central.
 3. `npm run check` (svelte-check + tsc).
 4. Manual: download a zip for the Cosmotyl config, eyeball file structure.
 
 ## Open items resolved during implementation
 
-- Exact Cosmos D-label → `&pro_micro` index map (verify vs `nice_nano_v2.dts`).
-- Whether to use a predefined `&pro_micro_i2c` alias or define an i2c node on
-  reserved pins.
+- Split column encoding (local vs global) — **the gate above; do first.**
+- Exact `pro_micro_i2c` default SDA/SCL pins (read `nice_nano-pinctrl.dtsi`) to
+  document for soldering.
 - Pin the azoteq driver to a specific revision SHA rather than `main`.
+- Whether to also fix the Lemon `diode-direction` hardcode or scope it to
+  nice!nano.
 
 ## Build sequence
 
-1. Snapshot-lock current Lemon ZMK output (test).
+1. **Verify split column encoding** (gate above) + snapshot-lock current Lemon
+   ZMK output (test).
 2. Introduce `ZMKBoard` interface; extract `lemonWirelessBoard`; make transform
-   dims + split colOffset generic. Snapshot must stay green.
-3. Implement `niceNanoBoard` matrix kscan + pin assignment + conf.
+   dims + split colOffset generic per the verified encoding. Snapshot stays green.
+3. Implement `niceNanoBoard` matrix kscan (`&pro_micro` pins, diode-direction
+   from options) + pin assignment + conf.
 4. Add `board` to `ZMKOptions`, `azoteq` to `ZMKPeripherals`; wire `PeaConfig`
-   UI block + peripheral detection.
-5. Add azoteq west/deps + trackpad overlay generation.
+   UI block + peripheral detection + central-side-trackpad check.
+5. Add azoteq west/deps + `pro_micro_i2c` trackpad overlay generation.
 6. nice!nano tests; `npm run check`; manual zip inspection.
