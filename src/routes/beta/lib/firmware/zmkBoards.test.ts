@@ -1,7 +1,20 @@
 import { expect, test } from 'bun:test'
 import type { CuttleKey } from '$lib/worker/config'
 import type { Matrix } from './firmwareHelpers'
-import { assignNiceNanoPins, matrixDims, NICENANO_PIN_ORDER } from './zmkBoards'
+import { assignNiceNanoPins, matrixDims, NICENANO_PIN_ORDER, niceNanoKscanNode } from './zmkBoards'
+
+// Minimal inline DTS serializer to avoid importing firmwareHelpers (which pulls
+// in $lib/* modules that require the SvelteKit build context to resolve).
+function camelToKebab(s: string) { return s.replace(/[A-Z]/g, l => '-' + l.toLowerCase()) }
+function dtsVal(v: any): string {
+  if (typeof v === 'string') return v.startsWith('&') || v.startsWith('<') ? v : `"${v}"`
+  if (Array.isArray(v)) return v.join(', ')
+  if (typeof v === 'object') return '{\n' + Object.entries(v).map(([k, val]) => `    ${camelToKebab(k)} = ${dtsVal(val)};`).join('\n') + '\n}'
+  return String(v)
+}
+function dtsFile(obj: Record<string, any>): string {
+  return Object.entries(obj).map(([k, v]) => `${k} ${dtsVal(v)}`).join('\n')
+}
 
 const key = () => ({} as unknown as CuttleKey)
 
@@ -42,4 +55,37 @@ test('assignNiceNanoPins with trackpad reserves reset+rdy first', () => {
 
 test('assignNiceNanoPins throws when not enough pins', () => {
   expect(() => assignNiceNanoPins({ rows: 10, cols: 10, trackpad: false })).toThrow()
+})
+
+test('niceNanoKscanNode ROW2COL uses active-low/pull-up and pro_micro pins', () => {
+  const node = niceNanoKscanNode({ rowPins: [2, 3], colPins: [4, 5, 6] }, 'ROW2COL')
+  expect(node).toEqual({
+    compatible: 'zmk,kscan-gpio-matrix',
+    diodeDirection: 'row2col',
+    rowGpios: [
+      '<&pro_micro 2 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>',
+      '<&pro_micro 3 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>',
+    ],
+    colGpios: [
+      '<&pro_micro 4 GPIO_ACTIVE_LOW>',
+      '<&pro_micro 5 GPIO_ACTIVE_LOW>',
+      '<&pro_micro 6 GPIO_ACTIVE_LOW>',
+    ],
+  })
+})
+
+test('niceNanoKscanNode COL2ROW uses active-high/pull-down', () => {
+  const node = niceNanoKscanNode({ rowPins: [0], colPins: [1] }, 'COL2ROW')
+  expect(node.diodeDirection).toBe('col2row')
+  expect(node.rowGpios).toEqual(['<&pro_micro 0 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>'])
+  expect(node.colGpios).toEqual(['<&pro_micro 1 GPIO_ACTIVE_HIGH>'])
+})
+
+test('niceNanoKscanNode renders through dtsFile without raw gpio refs', () => {
+  const out = dtsFile({ 'kscan0: kscan_0': niceNanoKscanNode({ rowPins: [2], colPins: [4] }, 'ROW2COL') })
+  expect(out).toContain('compatible = "zmk,kscan-gpio-matrix"')
+  expect(out).toContain('diode-direction = "row2col"')
+  expect(out).toContain('&pro_micro 2')
+  expect(out).not.toContain('&gpio0')
+  expect(out).not.toContain('595')
 })

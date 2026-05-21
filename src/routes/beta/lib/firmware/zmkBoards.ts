@@ -34,3 +34,16 @@ export function assignNiceNanoPins(
   const colPins = take(cols)
   return { rowPins, colPins, resetPin, rdyPin }
 }
+
+type DiodeDirection = 'COL2ROW' | 'ROW2COL'
+
+export function niceNanoKscanNode(pins: { rowPins: number[]; colPins: number[] }, diode: DiodeDirection) {
+  const activeMode = diode == 'COL2ROW' ? 'GPIO_ACTIVE_HIGH' : 'GPIO_ACTIVE_LOW'
+  const pullMode = diode == 'COL2ROW' ? 'GPIO_PULL_DOWN' : 'GPIO_PULL_UP'
+  return {
+    compatible: 'zmk,kscan-gpio-matrix',
+    diodeDirection: diode.toLowerCase(),
+    rowGpios: pins.rowPins.map(p => `<&pro_micro ${p} (${activeMode} | ${pullMode})>`),
+    colGpios: pins.colPins.map(p => `<&pro_micro ${p} ${activeMode}>`),
+  }
+}
