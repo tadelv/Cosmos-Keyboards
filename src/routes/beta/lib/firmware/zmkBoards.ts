@@ -9,3 +9,28 @@ export function matrixDims(matrix: Matrix): { rows: number; columns: number } {
   }
   return { rows, columns }
 }
+
+export const NICENANO_PIN_ORDER = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 14, 15, 16, 18, 19, 20, 21]
+
+export interface NiceNanoPins {
+  rowPins: number[]
+  colPins: number[]
+  resetPin?: number
+  rdyPin?: number
+}
+
+export function assignNiceNanoPins(
+  { rows, cols, trackpad }: { rows: number; cols: number; trackpad: boolean },
+): NiceNanoPins {
+  const pool = [...NICENANO_PIN_ORDER]
+  const take = (n: number) => {
+    if (pool.length < n) throw new Error(`Not enough nice!nano GPIO pins: need ${n} more, ${pool.length} left`)
+    return pool.splice(0, n)
+  }
+  let resetPin: number | undefined
+  let rdyPin: number | undefined
+  if (trackpad) [resetPin, rdyPin] = take(2)
+  const rowPins = take(rows)
+  const colPins = take(cols)
+  return { rowPins, colPins, resetPin, rdyPin }
+}
