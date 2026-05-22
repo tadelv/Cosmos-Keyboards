@@ -32,6 +32,19 @@ export function sideColumnSpan(matrix: Matrix, sideKeys: ReadonlyArray<unknown>)
   return max - min + 1
 }
 
+/**
+ * Smallest global matrix column index used by one side's keys, or 0 if none.
+ * For a globally-numbered split this is the right half's offset into the shared
+ * matrix transform (its locally-wired column 0 maps to this global column).
+ */
+export function sideColumnMin(matrix: Matrix, sideKeys: ReadonlyArray<unknown>): number {
+  let min = Infinity
+  for (const [k, [, c]] of matrix.entries()) {
+    if (sideKeys.includes(k as any)) min = Math.min(min, c)
+  }
+  return min === Infinity ? 0 : min
+}
+
 export const NICENANO_PIN_ORDER = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 14, 15, 16, 18, 19, 20, 21]
 
 /**

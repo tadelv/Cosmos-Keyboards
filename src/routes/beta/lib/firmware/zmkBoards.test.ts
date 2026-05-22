@@ -206,11 +206,48 @@ test('nice!nano conf omits Azoteq flags without a trackpad', () => {
 })
 
 test('Azoteq overlay binds iqs5xx@74 on pro_micro_i2c with reset/rdy on pro_micro', () => {
-  const m: Matrix = new Map([[key(), [0, 0]]])
-  const out = dtsFile(generateAzoteqOverlay(m) as any)
+  const out = dtsFile(generateAzoteqOverlay() as any)
   expect(out).toContain('azoteq,iqs5xx')
-  expect(out).toContain('pro_micro_i2c')
+  // Reference-override node, NOT a labelled node (`label: &ref {}` is invalid DTS).
+  expect(out).toContain('&pro_micro_i2c {')
+  expect(out).not.toContain('pro_micro_i2c: &pro_micro_i2c')
   expect(out).toContain('reset-gpios = <&pro_micro 0 GPIO_ACTIVE_LOW>')
   expect(out).toContain('rdy-gpios = <&pro_micro 1 GPIO_ACTIVE_HIGH>')
   expect(out).toContain('input-listener')
+})
+
+test('asymmetric split: right col-offset is the right half min global column', () => {
+  const sk = () => ({ type: 'mx-better' } as unknown as CuttleKey)
+  const L0 = sk(), L1 = sk(), L2 = sk(), R0 = sk()
+  // Left has 3 columns (0,1,2); right starts at global column 3 → col-offset 3.
+  const m: Matrix = new Map([[L0, [0, 0]], [L1, [0, 1]], [L2, [0, 2]], [R0, [0, 3]]])
+  const geo = { left: { c: { keys: [L0, L1, L2] } }, right: { c: { keys: [R0] } } } as any
+  const out = generateOverlay(geo, m, { ...dtsiOpts, board: 'nicenano' }, 'right')
+  expect(out).toContain('col-offset = <3>')
+})
+
+test('full-size split with trackpad fits the pin budget (regression: no throw)', () => {
+  const sk = () => ({ type: 'mx-better' } as unknown as CuttleKey)
+  // 7 rows, 7 columns per half (global 14). With a trackpad: 2 I2C excluded +
+  // 2 reset/rdy + 7 rows + 7 per-half cols = 16 ≤ 16 usable. Must not throw.
+  const m: Matrix = new Map()
+  const leftKeys: CuttleKey[] = [], rightKeys: CuttleKey[] = []
+  for (let r = 0; r < 7; r++) {
+    for (let c = 0; c < 7; c++) {
+      const l = sk(), rk = sk()
+      m.set(l, [r, c]) // left global cols 0..6
+      m.set(rk, [r, c + 7]) // right global cols 7..13
+      leftKeys.push(l)
+      rightKeys.push(rk)
+    }
+  }
+  const geo = { left: { c: { keys: leftKeys } }, right: { c: { keys: rightKeys } } } as any
+  const opts = {
+    ...dtsiOpts,
+    board: 'nicenano',
+    diodeDirection: 'ROW2COL',
+    peripherals: { left: { azoteq: false }, right: { azoteq: true }, unibody: { azoteq: false } },
+  } as any
+  expect(() => generateDTSI(geo, m, opts)).not.toThrow()
+  expect(generateDTSI(geo, m, opts)).toContain('columns = <14>') // global transform
 })

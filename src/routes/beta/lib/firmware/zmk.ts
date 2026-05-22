@@ -5,7 +5,7 @@ import { filterObj, findIndexIter, mapObjNotNull, mapObjNotNullToObj, mapObjToOb
 import { strToU8, zip } from 'fflate'
 import type { FullGeometry } from '../viewers/viewer3dHelpers'
 import { dtsFile, encoderKeys, fullLayout, logicalKeys, type Matrix, raw, yamlFile } from './firmwareHelpers'
-import { assignNiceNanoPins, lemonWirelessBoard, matrixDims, niceNanoBoard, sideColumnSpan, type ZMKBoard } from './zmkBoards'
+import { assignNiceNanoPins, lemonWirelessBoard, niceNanoBoard, sideColumnMin, sideColumnSpan, type ZMKBoard } from './zmkBoards'
 
 const RE_PID_VID = /^0x[0-9A-Fa-f]{4}$/
 
@@ -523,15 +523,16 @@ function generateZMKYaml(config: FullGeometry, options: ZMKOptions) {
   })
 }
 
-export function generateAzoteqOverlay(matrix: Matrix): object {
-  const { rows, columns } = matrixDims(matrix)
-  const pins = assignNiceNanoPins({ rows, cols: columns, trackpad: true })
+export function generateAzoteqOverlay(): object {
+  // Only the reset/rdy pins are needed; they are always the first two pool pins
+  // (0, 1) regardless of matrix size, so no matrix dims are required here.
+  const pins = assignNiceNanoPins({ rows: 0, cols: 0, trackpad: true })
   return {
     'trackpad_input: trackpad_input': {
       compatible: 'zmk,input-listener',
       device: '<&trackpad>',
     },
-    'pro_micro_i2c: &pro_micro_i2c': {
+    '&pro_micro_i2c': {
       status: 'okay',
       'trackpad: iqs5xx@74': {
         compatible: 'azoteq,iqs5xx',
@@ -553,21 +554,21 @@ export function generateOverlay(config: FullGeometry, matrix: Matrix, options: Z
   // Find the bootloader position, which should be the index of the key with (0,0) matrix position.
   // If no suck key exists, fall back to the first key on the left/right side.
   const right = side === 'right'
-  let bootloaderPosition = findIndexIter(matrix.values(), m => m[0] == 0 && m[1] == (right ? 7 : 0))
+
+  // The right shield shifts its locally-wired columns into the shared transform
+  // space. Lemon is fixed at column 7; nice!nano uses the right half's smallest
+  // global column index (its local column 0 maps to that global column).
+  const rightMin = config.right ? sideColumnMin(matrix, config.right.c.keys) : 7
+  const colOffset = options.board == 'lemon-wireless' ? 7 : rightMin
+
+  // The bootmagic key sits at global (row 0, first column of this side).
+  const bootCol = right ? colOffset : 0
+  let bootloaderPosition = findIndexIter(matrix.values(), m => m[0] == 0 && m[1] == bootCol)
   if (bootloaderPosition == -1 && right && config.right) bootloaderPosition = findIndexIter(matrix.keys(), k => config.right!.c.keys.includes(k))
   if (bootloaderPosition == -1 && !right && config.left) bootloaderPosition = findIndexIter(matrix.keys(), k => config.left!.c.keys.includes(k))
   if (bootloaderPosition == -1) bootloaderPosition = 0
 
   const encoders = config[side] ? encoderKeys(config[side].c) : []
-
-  // The right shield shifts its locally-wired columns into the global transform
-  // space. Lemon is fixed at 7; nice!nano uses the left half's column count
-  // (left is numbered from 0, so its span equals its column count).
-  const colOffset = options.board == 'lemon-wireless'
-    ? 7
-    : config.left
-    ? sideColumnSpan(matrix, config.left.c.keys)
-    : 7
 
   const hasAzoteq = options.board == 'nicenano' && !!config[side] && config[side]!.c.keys.some(k => k.type == 'trackpad-azoteq')
 
@@ -590,7 +591,7 @@ export function generateOverlay(config: FullGeometry, matrix: Matrix, options: Z
         },
       }
       : {}),
-    ...(hasAzoteq ? generateAzoteqOverlay(matrix) : {}),
+    ...(hasAzoteq ? generateAzoteqOverlay() : {}),
   })
 }
 
@@ -670,7 +671,24 @@ export function downloadZMKCode(config: FullGeometry, matrix: Matrix, options: Z
     alert('Invalid folder name')
     return
   }
-  zip({
+  let files: Parameters<typeof zip>[0]
+  try {
+    files = buildZMKFiles(config, matrix, options)
+  } catch (e) {
+    alert('Could not generate firmware: ' + (e instanceof Error ? e.message : String(e)))
+    return
+  }
+  zip(files, (err, data) => {
+    if (!err) {
+      const blob = new Blob([data.buffer as ArrayBuffer], { type: 'application/x-zip' })
+      download(blob, `firmware-${options.folderName}.zip`)
+    }
+  })
+}
+
+function buildZMKFiles(config: FullGeometry, matrix: Matrix, options: ZMKOptions): Parameters<typeof zip>[0] {
+  const { folderName } = options
+  return {
     [folderName]: {
       '.github/workflows/build.yml': strToU8(generateGitHubWorkflow()),
       'build.yaml': strToU8(generateBuildYaml(config, options)),
@@ -700,12 +718,7 @@ export function downloadZMKCode(config: FullGeometry, matrix: Matrix, options: Z
           }),
       },
     },
-  }, (err, data) => {
-    if (!err) {
-      const blob = new Blob([data.buffer as ArrayBuffer], { type: 'application/x-zip' })
-      download(blob, `firmware-${options.folderName}.zip`)
-    }
-  })
+  }
 }
 
 export function* zmkInfo(config: Geometry) {
