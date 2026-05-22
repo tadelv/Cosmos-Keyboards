@@ -5,7 +5,7 @@ import { filterObj, findIndexIter, mapObjNotNull, mapObjNotNullToObj, mapObjToOb
 import { strToU8, zip } from 'fflate'
 import type { FullGeometry } from '../viewers/viewer3dHelpers'
 import { dtsFile, encoderKeys, fullLayout, logicalKeys, type Matrix, raw, yamlFile } from './firmwareHelpers'
-import { lemonWirelessBoard, niceNanoBoard, sideColumnSpan, type ZMKBoard } from './zmkBoards'
+import { assignNiceNanoPins, lemonWirelessBoard, matrixDims, niceNanoBoard, sideColumnSpan, type ZMKBoard } from './zmkBoards'
 
 const RE_PID_VID = /^0x[0-9A-Fa-f]{4}$/
 
@@ -245,16 +245,27 @@ function generateBuildYaml(config: FullGeometry, options: ZMKOptions): string {
   }, true)
 }
 
-function generateModuleYaml(): string {
+function generateModuleYaml(options: ZMKOptions): string {
   return yamlFile({
     build: {
-      depends: ['vik-core'],
+      depends: options.board == 'nicenano' ? [] : ['vik-core'],
       settings: { board_root: '.' },
     },
   })
 }
 
-function generateDepsYaml(): string {
+function generateDepsYaml(options: ZMKOptions): string {
+  if (options.board == 'nicenano') {
+    return yamlFile({
+      manifest: {
+        remotes: [{ name: 'aym1607', 'url-base': 'https://github.com/AYM1607' }],
+        projects: [
+          // TODO before merge: pin `revision` to a specific commit SHA of the driver.
+          { name: 'zmk-driver-azoteq-iqs5xx', remote: 'aym1607', revision: 'main' },
+        ],
+      },
+    })
+  }
   return yamlFile({
     manifest: {
       remotes: [
@@ -268,7 +279,19 @@ function generateDepsYaml(): string {
   })
 }
 
-function generateWestYaml(): string {
+function generateWestYaml(options: ZMKOptions): string {
+  if (options.board == 'nicenano') {
+    return yamlFile({
+      manifest: {
+        remotes: [
+          { name: 'zmkfirmware', 'url-base': 'https://github.com/zmkfirmware' },
+          { name: 'rianadon', 'url-base': 'https://github.com/rianadon' },
+        ],
+        projects: [{ name: 'zmk', remote: 'rianadon', revision: 'main', import: 'app/west.yml' }],
+        self: { path: 'config', import: 'deps.yml' },
+      },
+    })
+  }
   return yamlFile({
     manifest: {
       remotes: [
@@ -316,7 +339,23 @@ config SHIELD_${options.folderName}_RIGHT
 `
 }
 
-function generateConf(config: FullGeometry, options: ZMKOptions) {
+export function generateConf(config: FullGeometry, options: ZMKOptions) {
+  if (options.board == 'nicenano') {
+    const hasAzoteq = Object.values(options.peripherals).some((p) => p.azoteq)
+    return [
+      'CONFIG_ZMK_SLEEP=y',
+      ...(hasAzoteq
+        ? [
+          '',
+          '# Azoteq IQS5xx trackpad',
+          'CONFIG_I2C=y',
+          'CONFIG_INPUT=y',
+          'CONFIG_INPUT_AZOTEQ_IQS5XX=y',
+          'CONFIG_ZMK_POINTING=y',
+        ]
+        : []),
+    ].join('\n') + '\n'
+  }
   return [
     'CONFIG_SPI=y',
     '',
@@ -484,6 +523,32 @@ function generateZMKYaml(config: FullGeometry, options: ZMKOptions) {
   })
 }
 
+export function generateAzoteqOverlay(matrix: Matrix): object {
+  const { rows, columns } = matrixDims(matrix)
+  const pins = assignNiceNanoPins({ rows, cols: columns, trackpad: true })
+  return {
+    'trackpad_input: trackpad_input': {
+      compatible: 'zmk,input-listener',
+      device: '<&trackpad>',
+    },
+    'pro_micro_i2c: &pro_micro_i2c': {
+      status: 'okay',
+      'trackpad: iqs5xx@74': {
+        compatible: 'azoteq,iqs5xx',
+        reg: 0x74,
+        resetGpios: `<&pro_micro ${pins.resetPin} GPIO_ACTIVE_LOW>`,
+        rdyGpios: `<&pro_micro ${pins.rdyPin} GPIO_ACTIVE_HIGH>`,
+        oneFingerTap: true,
+        pressAndHold: true,
+        twoFingerTap: true,
+        scroll: true,
+        bottomBeta: 5,
+        stationaryThreshold: 5,
+      },
+    },
+  }
+}
+
 export function generateOverlay(config: FullGeometry, matrix: Matrix, options: ZMKOptions, side: keyof FullGeometry) {
   // Find the bootloader position, which should be the index of the key with (0,0) matrix position.
   // If no suck key exists, fall back to the first key on the left/right side.
@@ -504,6 +569,8 @@ export function generateOverlay(config: FullGeometry, matrix: Matrix, options: Z
     ? sideColumnSpan(matrix, config.left.c.keys)
     : 7
 
+  const hasAzoteq = options.board == 'nicenano' && !!config[side] && config[side]!.c.keys.some(k => k.type == 'trackpad-azoteq')
+
   return dtsFile({
     [raw()]: `#include "${options.folderName}.dtsi"`,
     '/': {
@@ -523,6 +590,7 @@ export function generateOverlay(config: FullGeometry, matrix: Matrix, options: Z
         },
       }
       : {}),
+    ...(hasAzoteq ? generateAzoteqOverlay(matrix) : {}),
   })
 }
 
@@ -606,11 +674,13 @@ export function downloadZMKCode(config: FullGeometry, matrix: Matrix, options: Z
     [folderName]: {
       '.github/workflows/build.yml': strToU8(generateGitHubWorkflow()),
       'build.yaml': strToU8(generateBuildYaml(config, options)),
-      'zephyr/module.yml': strToU8(generateModuleYaml()),
-      'config/deps.yml': strToU8(generateDepsYaml()),
-      'config/west.yml': strToU8(generateWestYaml()),
+      'zephyr/module.yml': strToU8(generateModuleYaml(options)),
+      'config/deps.yml': strToU8(generateDepsYaml(options)),
+      'config/west.yml': strToU8(generateWestYaml(options)),
       [`boards/shields/${folderName}`]: {
-        [`boards/${boardProfile(options).boardId(options)}.overlay`]: strToU8(BOARD_OVERLAY),
+        ...(options.board == 'lemon-wireless'
+          ? { [`boards/${boardProfile(options).boardId(options)}.overlay`]: strToU8(BOARD_OVERLAY) }
+          : {}),
         'Kconfig.defconfig': strToU8(generateDefconfig(config, options)),
         'Kconfig.shield': strToU8(generateShield(config, options)),
         [folderName + '.dtsi']: strToU8(generateDTSI(config, matrix, options)),

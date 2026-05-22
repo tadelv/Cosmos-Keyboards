@@ -1,7 +1,7 @@
 import type { CuttleKey } from '$lib/worker/config'
 import { expect, test } from 'bun:test'
 import { dtsFile, type Matrix } from './firmwareHelpers'
-import { generateDTSI, generateOverlay } from './zmk'
+import { generateAzoteqOverlay, generateConf, generateDTSI, generateOverlay } from './zmk'
 import { assignNiceNanoPins, lemonWirelessBoard, matrixDims, NICENANO_PIN_ORDER, niceNanoBoard, niceNanoKscanNode, sideColumnSpan } from './zmkBoards'
 
 const key = () => ({} as unknown as CuttleKey)
@@ -190,4 +190,27 @@ test('nice!nano right overlay col-offset equals the left half column count', () 
   const geo = { left: { c: { keys: [L0, L1] } }, right: { c: { keys: [R0] } } } as any
   const out = generateOverlay(geo, m, { ...dtsiOpts, board: 'nicenano' }, 'right')
   expect(out).toContain('col-offset = <2>')
+})
+
+test('nice!nano conf enables Azoteq pointing when a trackpad is present', () => {
+  const opts = { board: 'nicenano', peripherals: { unibody: { azoteq: true } } } as any
+  const conf = generateConf({ unibody: { c: { keys: [] } } } as any, opts)
+  expect(conf).toContain('CONFIG_INPUT_AZOTEQ_IQS5XX=y')
+  expect(conf).toContain('CONFIG_ZMK_POINTING=y')
+  expect(conf).toContain('CONFIG_I2C=y')
+})
+
+test('nice!nano conf omits Azoteq flags without a trackpad', () => {
+  const opts = { board: 'nicenano', peripherals: { unibody: { azoteq: false } } } as any
+  expect(generateConf({ unibody: { c: { keys: [] } } } as any, opts)).not.toContain('AZOTEQ')
+})
+
+test('Azoteq overlay binds iqs5xx@74 on pro_micro_i2c with reset/rdy on pro_micro', () => {
+  const m: Matrix = new Map([[key(), [0, 0]]])
+  const out = dtsFile(generateAzoteqOverlay(m) as any)
+  expect(out).toContain('azoteq,iqs5xx')
+  expect(out).toContain('pro_micro_i2c')
+  expect(out).toContain('reset-gpios = <&pro_micro 0 GPIO_ACTIVE_LOW>')
+  expect(out).toContain('rdy-gpios = <&pro_micro 1 GPIO_ACTIVE_HIGH>')
+  expect(out).toContain('input-listener')
 })
