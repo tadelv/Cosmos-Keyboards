@@ -2,7 +2,7 @@ import type { CuttleKey } from '$lib/worker/config'
 import { expect, test } from 'bun:test'
 import { dtsFile, type Matrix } from './firmwareHelpers'
 import { generateDTSI } from './zmk'
-import { assignNiceNanoPins, lemonWirelessBoard, matrixDims, NICENANO_PIN_ORDER, niceNanoBoard, niceNanoKscanNode } from './zmkBoards'
+import { assignNiceNanoPins, lemonWirelessBoard, matrixDims, NICENANO_PIN_ORDER, niceNanoBoard, niceNanoKscanNode, sideColumnSpan } from './zmkBoards'
 
 const key = () => ({} as unknown as CuttleKey)
 
@@ -112,10 +112,25 @@ test('niceNanoBoard derives transform dims from the matrix', () => {
 })
 
 test('niceNanoBoard kscan reflects diode direction and trackpad reservation', () => {
-  const m: Matrix = new Map([[key(), [0, 0]]])
-  const node = niceNanoBoard.kscanNode(m, { diodeDirection: 'COL2ROW', peripherals: { unibody: { azoteq: false } } } as any)
+  const node = niceNanoBoard.kscanNode({ rows: 1, columns: 1 }, { diodeDirection: 'COL2ROW', peripherals: { unibody: { azoteq: false } } } as any)
   expect(node.rowGpios).toEqual(['<&pro_micro 0 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>'])
   expect(node.colGpios).toEqual(['<&pro_micro 1 GPIO_ACTIVE_HIGH>'])
+})
+
+test('sideColumnSpan: left starts at 0 → span equals column count', () => {
+  const a = key(), b = key()
+  const m: Matrix = new Map([[a, [0, 0]], [b, [0, 3]]])
+  expect(sideColumnSpan(m, [a, b])).toBe(4)
+})
+
+test('sideColumnSpan: globally-numbered right half spans its own width', () => {
+  const a = key(), b = key()
+  const m: Matrix = new Map([[a, [0, 7]], [b, [0, 13]]])
+  expect(sideColumnSpan(m, [a, b])).toBe(7) // cols 7..13
+})
+
+test('sideColumnSpan of keys not in the matrix is 0', () => {
+  expect(sideColumnSpan(new Map(), [key()])).toBe(0)
 })
 
 const dtsiOpts = {
@@ -145,4 +160,18 @@ test('nice!nano DTSI emits pro_micro matrix, no shifter', () => {
   expect(out).not.toContain('zmk,gpio-595')
   expect(out).toContain('columns = <3>') // matrix max col 2 + 1
   expect(out).toContain('rows = <2>') // matrix max row 1 + 1
+})
+
+test('nice!nano split kscan wires per-half columns, transform stays global', () => {
+  const sk = () => ({ type: 'mx-better' } as unknown as CuttleKey) // valid socket type so encoderKeys() works
+  const L0 = sk(), L1 = sk(), R0 = sk(), R1 = sk()
+  // 2 columns per half; right half numbered globally (2,3) → 4 columns total
+  const splitMatrix: Matrix = new Map([[L0, [0, 0]], [L1, [0, 1]], [R0, [0, 2]], [R1, [0, 3]]])
+  const splitGeo = { left: { c: { keys: [L0, L1] } }, right: { c: { keys: [R0, R1] } } } as any
+  const out = generateDTSI(splitGeo, splitMatrix, { ...dtsiOpts, board: 'nicenano', diodeDirection: 'ROW2COL' })
+  // Transform spans the full keyboard...
+  expect(out).toContain('columns = <4>')
+  // ...but each nice!nano's kscan wires only its own 2 columns (col-gpios, not row-gpios).
+  const colGpios = (out.match(/&pro_micro \d+ GPIO_ACTIVE_LOW>/g) || []).length
+  expect(colGpios).toBe(2)
 })

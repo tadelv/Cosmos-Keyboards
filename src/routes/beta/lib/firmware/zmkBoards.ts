@@ -11,6 +11,27 @@ export function matrixDims(matrix: Matrix): { rows: number; columns: number } {
   return { rows, columns }
 }
 
+/**
+ * Number of matrix columns spanned by one side's keys: (maxCol - minCol + 1).
+ * Columns are numbered globally across a split (right side continues from the
+ * left), so the left side starts at 0 and its span equals its column count,
+ * while the right side's span is its own physical column count. Used to size a
+ * single nice!nano's shared kscan (each half wires only its own columns) and to
+ * derive the right shield's matrix-transform col-offset.
+ */
+export function sideColumnSpan(matrix: Matrix, sideKeys: ReadonlyArray<unknown>): number {
+  let min = Infinity
+  let max = -Infinity
+  for (const [k, [, c]] of matrix.entries()) {
+    if (sideKeys.includes(k as any)) {
+      min = Math.min(min, c)
+      max = Math.max(max, c)
+    }
+  }
+  if (max < 0) return 0
+  return max - min + 1
+}
+
 export const NICENANO_PIN_ORDER = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 14, 15, 16, 18, 19, 20, 21]
 
 export interface NiceNanoPins {
@@ -52,8 +73,12 @@ export function niceNanoKscanNode(pins: { rowPins: number[]; colPins: number[] }
 export interface ZMKBoard {
   boardId(options: ZMKOptions): string
   transformDims(matrix: Matrix): { columns: number; rows: number }
-  /** The kscan0 node object passed to dtsFile. */
-  kscanNode(matrix: Matrix, options: ZMKOptions): { compatible: string; diodeDirection: string; rowGpios: string[]; colGpios: string[] }
+  /**
+   * The kscan0 node object passed to dtsFile. `dims` are the per-board kscan
+   * dimensions (for a split nice!nano these are one half's rows/columns, NOT the
+   * global transform size).
+   */
+  kscanNode(dims: { rows: number; columns: number }, options: ZMKOptions): { compatible: string; diodeDirection: string; rowGpios: string[]; colGpios: string[] }
 }
 
 function anyAzoteq(options: ZMKOptions): boolean {
@@ -63,9 +88,8 @@ function anyAzoteq(options: ZMKOptions): boolean {
 export const niceNanoBoard: ZMKBoard = {
   boardId: () => 'nice_nano_v2',
   transformDims: (matrix) => matrixDims(matrix),
-  kscanNode: (matrix, options) => {
-    const { rows, columns } = matrixDims(matrix)
-    const pins = assignNiceNanoPins({ rows, cols: columns, trackpad: anyAzoteq(options) })
+  kscanNode: (dims, options) => {
+    const pins = assignNiceNanoPins({ rows: dims.rows, cols: dims.columns, trackpad: anyAzoteq(options) })
     return niceNanoKscanNode(pins, options.diodeDirection)
   },
 }
@@ -73,7 +97,7 @@ export const niceNanoBoard: ZMKBoard = {
 export const lemonWirelessBoard: ZMKBoard = {
   boardId: (o) => o.wirelessVersion == 'v0.4' ? 'cosmos_lemon_wireless_v4' : 'cosmos_lemon_wireless',
   transformDims: () => ({ columns: 14, rows: 7 }),
-  kscanNode: (_matrix, options) => {
+  kscanNode: (_dims, options) => {
     const activeMode = options.diodeDirection == 'COL2ROW' ? 'GPIO_ACTIVE_HIGH' : 'GPIO_ACTIVE_LOW'
     const pullMode = options.diodeDirection == 'COL2ROW' ? 'GPIO_PULL_DOWN' : 'GPIO_PULL_UP'
     return {

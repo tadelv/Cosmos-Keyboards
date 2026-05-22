@@ -5,7 +5,7 @@ import { filterObj, findIndexIter, mapObjNotNull, mapObjNotNullToObj, mapObjToOb
 import { strToU8, zip } from 'fflate'
 import type { FullGeometry } from '../viewers/viewer3dHelpers'
 import { dtsFile, encoderKeys, fullLayout, logicalKeys, type Matrix, raw, yamlFile } from './firmwareHelpers'
-import { lemonWirelessBoard, niceNanoBoard, type ZMKBoard } from './zmkBoards'
+import { lemonWirelessBoard, niceNanoBoard, sideColumnSpan, type ZMKBoard } from './zmkBoards'
 
 const RE_PID_VID = /^0x[0-9A-Fa-f]{4}$/
 
@@ -377,9 +377,24 @@ function lemonExtPowerHog() {
   }
 }
 
+/**
+ * Per-half kscan dimensions for nice!nano. Rows are shared across both halves
+ * (no row-offset), so they use the global row count. Columns use the widest
+ * single side, because each nice!nano's shared kscan wires only its own
+ * columns; the right shield shifts into the global space via col-offset. Falls
+ * back to the global column count when side membership can't be determined
+ * (e.g. unibody, where one side already equals the global span).
+ */
+function niceNanoKscanDims(config: FullGeometry, matrix: Matrix, transformDims: { rows: number; columns: number }) {
+  const spans = objEntriesNotNull(config).map(([, g]) => sideColumnSpan(matrix, g.c.keys)).filter(s => s > 0)
+  const columns = spans.length ? Math.max(...spans) : transformDims.columns
+  return { rows: transformDims.rows, columns }
+}
+
 export function generateDTSI(config: FullGeometry, matrix: Matrix, options: ZMKOptions) {
   const board = boardProfile(options)
   const dims = board.transformDims(matrix)
+  const kscanDims = options.board == 'nicenano' ? niceNanoKscanDims(config, matrix, dims) : dims
   const isLemon = options.board == 'lemon-wireless'
   const encoders = mapObjNotNull(config, (g) => encoderKeys(g.c))
   const encodersWithLength = filterObj(encoders, (k, v) => v.length > 0)
@@ -402,7 +417,7 @@ export function generateDTSI(config: FullGeometry, matrix: Matrix, options: ZMKO
         rows: dims.rows,
         map: '<' + Array.from(matrix.values()).map(([r, c]) => `RC(${r},${c})`).join(' ') + '>',
       },
-      'kscan0: kscan_0': board.kscanNode(matrix, options),
+      'kscan0: kscan_0': board.kscanNode(kscanDims, options),
       ...mapObjToObj(encodersWithLength, (encoders, side) => ({
         [`${side}_encoder: encoder_${side}`]: {
           compatible: 'alps,ec11',
