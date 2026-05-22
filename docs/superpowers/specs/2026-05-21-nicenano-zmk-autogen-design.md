@@ -34,11 +34,13 @@ the **physical pin** assignment and a generic, non-Lemon board path.
 ## Scope (v1)
 
 In:
+
 - Split (left/right with selectable central side) **and** unibody.
 - Key matrix with auto-assigned default pins.
 - Azoteq IQS5xx-family trackpad (IQS550 / PS65) over I2C — **mandatory**.
 
 Out (deferred):
+
 - RGB underglow, encoders, PMW3610/Cirque pointing on nice!nano.
 - User-editable pin assignment UI (auto-assign only; pins documented in output).
 - IQS7211E / Procyon (different chip; not the user's hardware).
@@ -67,17 +69,20 @@ interface ZMKBoard {
 ```
 
 Implementations:
+
 - `lemonWirelessBoard` — existing behavior moved verbatim (595 shifter kscan,
   VIK SPI, `ext_power_hog`, `vik-core` depends, `BOARD_OVERLAY`).
 - `niceNanoBoard` — described below.
 
 `downloadZMKCode` selects the profile from `options.board` and:
+
 - omits the `boards/<board>.overlay` file when `customBoardOverlay` returns
   undefined,
 - uses `kscanNode`, `confLines`, `westProjects`, `moduleDepends` from the
   profile.
 
 Two existing hardcodes become generic (correctness win for both boards):
+
 - **Matrix transform dims**: `columns`/`rows` computed from the matrix Map
   (`max col + 1`, `max row + 1`) instead of `14`/`7`.
 - **Split `colOffset`** in `generateOverlay`: derived from the left side's
@@ -125,6 +130,7 @@ reference these as `<&pro_micro N ...>` — no raw `&gpio0/1` port/pin table nee
 ### Pin assignment (auto)
 
 Assignment order, sliced to the matrix's actual counts:
+
 1. If a trackpad is present, **I2C SDA/SCL are fixed to the board's
    `pro_micro_i2c` default pins** (not drawn from the pool — see trackpad
    section) and only **reset + rdy (2 pins)** are reserved from the pool.
@@ -159,6 +165,7 @@ on TPS43 and TPS65 — same IQS5xx family as the PS65/IQS550). Devicetree
 `rdy-gpios`.
 
 **west.yml** gains:
+
 ```yaml
 remotes:
   - name: aym1607
@@ -206,7 +213,7 @@ trackpad_input: trackpad_input {
 attaches to the side whose Cosmos config contains a `trackpad-azoteq` key; for
 split, only that side's overlay/conf gets the node.
 
-**Split constraint (v1):** a pointing device on the *peripheral* half requires
+**Split constraint (v1):** a pointing device on the _peripheral_ half requires
 ZMK split input forwarding over BLE, which the reference shields don't exercise.
 For v1, **require the trackpad half to be the central side** and surface this in
 the UI / errors (`zmkErrors`) when the config puts the trackpad on the
@@ -222,6 +229,7 @@ the exact PS65 is for the user to flash and confirm.
 `PeaConfig.svelte`: add a block for
 `anyConfig.microcontroller == 'nrfmicro-or-nicenano'`, mirroring the
 `lemon-wireless` block but:
+
 - keep: diode direction, central side, ZMK Studio, USB logging,
   "Download ZMK code".
 - drop: wireless version select, RGB toggle.
@@ -236,6 +244,7 @@ the exact PS65 is for the user to flash and confirm.
 ## File outputs (zip) for nice!nano
 
 Same layout as Lemon, minus the custom board overlay:
+
 ```
 <folder>/
   .github/workflows/build.yml      (shared)
@@ -256,7 +265,7 @@ Same layout as Lemon, minus the custom board overlay:
 The matrix `Map<CuttleKey,[row,col]>` is built by manual user entry in
 `ViewerPea.svelte` (`:70`) with **no automatic column offset**. Lemon hardcodes
 `columns=14, rows=7` and a right-side `col-offset=7`; `isBootmagic` (`:94`)
-accepts right `(0,0)` for ZMK, which hints right columns may be entered *local*
+accepts right `(0,0)` for ZMK, which hints right columns may be entered _local_
 (0-based per side). If right columns are local, the shared `default_transform`
 map would have colliding `RC(r,c)` entries between halves — so either the map is
 generated with the offset baked in, or right entries are actually global.
@@ -266,10 +275,10 @@ generate a real Lemon **split** ZMK zip from a known config, open
 `<folder>.dtsi` + `<folder>_right.overlay`, and trace one right-side key from its
 matrix value → transform `map` entry → `col-offset` → bindings index. Document
 whether values are local or global. Then:
+
 - if **global**: `columns = max(col)+1`, no per-side offset in the map; the right
   overlay `col-offset` stays as a no-op or is dropped.
-- if **local**: derive `columns = leftCols + rightCols`, keep `col-offset =
-  leftCols`, and the map must add the offset for right keys.
+- if **local**: derive `columns = leftCols + rightCols`, keep `col-offset = leftCols`, and the map must add the offset for right keys.
 
 Getting this wrong yields a keyboard whose right half types the wrong keys, so it
 gates the dim-derivation work in step 2 below.
@@ -299,6 +308,26 @@ gates the dim-derivation work in step 2 below.
 - Pin the azoteq driver to a specific revision SHA rather than `main`.
 - Whether to also fix the Lemon `diode-direction` hardcode or scope it to
   nice!nano.
+
+## Implementation corrections (discovered during build)
+
+The split case needed three corrections beyond the original design, all now
+implemented and regression-tested:
+
+1. **Per-half kscan sizing.** A split shares one kscan node; each nice!nano
+   wires only its own columns. `kscanNode` takes explicit per-half dims
+   (`niceNanoKscanDims`: rows global, columns = widest single side). Sizing from
+   the global column count overflowed nice!nano's 18 GPIO. Confirmed convention:
+   right-half columns are numbered **globally** (continue from the left).
+2. **I2C pins excluded from the pool.** `pro_micro_i2c` (`&i2c0`) is board-fixed
+   to SDA=D2 (P0.17) / SCL=D3 (P0.20) = pro_micro indices 2,3.
+   `assignNiceNanoPins` removes those when a trackpad is present so the matrix
+   never collides with the I2C bus. Reset/rdy then take pins 0,1.
+3. **Right col-offset / bootmagic column = right half's min global column**
+   (`sideColumnMin`), not the literal 7, for correct non-7-wide splits.
+4. The I2C node is emitted as a plain `&pro_micro_i2c` reference override (a
+   labelled reference is invalid DTS), and pin-budget overflow is surfaced to
+   the user via an alert rather than crashing the download.
 
 ## Build sequence
 
