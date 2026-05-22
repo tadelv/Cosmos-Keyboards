@@ -484,7 +484,7 @@ function generateZMKYaml(config: FullGeometry, options: ZMKOptions) {
   })
 }
 
-function generateOverlay(config: FullGeometry, matrix: Matrix, options: ZMKOptions, side: keyof FullGeometry) {
+export function generateOverlay(config: FullGeometry, matrix: Matrix, options: ZMKOptions, side: keyof FullGeometry) {
   // Find the bootloader position, which should be the index of the key with (0,0) matrix position.
   // If no suck key exists, fall back to the first key on the left/right side.
   const right = side === 'right'
@@ -494,6 +494,15 @@ function generateOverlay(config: FullGeometry, matrix: Matrix, options: ZMKOptio
   if (bootloaderPosition == -1) bootloaderPosition = 0
 
   const encoders = config[side] ? encoderKeys(config[side].c) : []
+
+  // The right shield shifts its locally-wired columns into the global transform
+  // space. Lemon is fixed at 7; nice!nano uses the left half's column count
+  // (left is numbered from 0, so its span equals its column count).
+  const colOffset = options.board == 'lemon-wireless'
+    ? 7
+    : config.left
+    ? sideColumnSpan(matrix, config.left.c.keys)
+    : 7
 
   return dtsFile({
     [raw()]: `#include "${options.folderName}.dtsi"`,
@@ -505,7 +514,7 @@ function generateOverlay(config: FullGeometry, matrix: Matrix, options: ZMKOptio
       },
     },
     '&default_transform': right && {
-      colOffset: 7,
+      colOffset,
     },
     ...(encoders.length
       ? {

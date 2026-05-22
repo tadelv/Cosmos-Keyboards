@@ -1,7 +1,7 @@
 import type { CuttleKey } from '$lib/worker/config'
 import { expect, test } from 'bun:test'
 import { dtsFile, type Matrix } from './firmwareHelpers'
-import { generateDTSI } from './zmk'
+import { generateDTSI, generateOverlay } from './zmk'
 import { assignNiceNanoPins, lemonWirelessBoard, matrixDims, NICENANO_PIN_ORDER, niceNanoBoard, niceNanoKscanNode, sideColumnSpan } from './zmkBoards'
 
 const key = () => ({} as unknown as CuttleKey)
@@ -174,4 +174,19 @@ test('nice!nano split kscan wires per-half columns, transform stays global', () 
   // ...but each nice!nano's kscan wires only its own 2 columns (col-gpios, not row-gpios).
   const colGpios = (out.match(/&pro_micro \d+ GPIO_ACTIVE_LOW>/g) || []).length
   expect(colGpios).toBe(2)
+})
+
+test('Lemon right overlay keeps fixed col-offset 7', () => {
+  const out = generateOverlay(dtsiGeo, dtsiMatrix, dtsiOpts, 'right')
+  expect(out).toContain('col-offset = <7>')
+})
+
+test('nice!nano right overlay col-offset equals the left half column count', () => {
+  const sk = () => ({ type: 'mx-better' } as unknown as CuttleKey)
+  const L0 = sk(), L1 = sk(), R0 = sk()
+  // Left occupies columns 0,1 (count 2) → right shield col-offset must be 2.
+  const m: Matrix = new Map([[L0, [0, 0]], [L1, [0, 1]], [R0, [0, 2]]])
+  const geo = { left: { c: { keys: [L0, L1] } }, right: { c: { keys: [R0] } } } as any
+  const out = generateOverlay(geo, m, { ...dtsiOpts, board: 'nicenano' }, 'right')
+  expect(out).toContain('col-offset = <2>')
 })
