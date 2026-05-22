@@ -1163,7 +1163,7 @@
       its holder.
     </InfoBox>
   {/if}
-  {#if flags.lemons && $protoConfig.microcontroller && !$protoConfig.microcontroller.startsWith('lemon')}
+  {#if flags.lemons && $protoConfig.microcontroller && !$protoConfig.microcontroller.startsWith('lemon') && $protoConfig.microcontroller != 'nrfmicro-or-nicenano'}
     <InfoBox
       ><a class="text-pink-600 underline" href="docs/firmware/" target="_blank">Firmware autogen</a> is not
       yet supported for this microcontroller. Switch to a Lemon microcontroller to use it.</InfoBox

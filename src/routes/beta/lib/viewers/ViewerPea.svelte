@@ -21,7 +21,17 @@
   let matrices = new Map<CuttleKey, [number, number]>()
   let matrixState: [typeof matrices, number] = [matrices, 0]
   export let fullMatrix: typeof matrices | null
+  /** When provided (nice!nano), the matrix is auto-generated, not captured via peaMK. */
+  export let autoMatrix: Map<CuttleKey, [number, number]> | null = null
   $: fullMatrix = activeKey ? null : matrices
+
+  // Pre-fill from the auto-generated matrix and mark every key done, skipping capture.
+  $: if (autoMatrix) loadAutoMatrix(autoMatrix, possibleKeys.length)
+  function loadAutoMatrix(am: Map<CuttleKey, [number, number]>, count: number) {
+    matrices = am
+    matrixState = [am, 1]
+    activeIndex = count
+  }
   $: repeatedMatrices = repeated(Array.from(matrixState[0].values()).map((v) => v.join(',')))
 
   $: centers = fullEstimatedCenter(geometry, false)
@@ -99,10 +109,12 @@
 <svelte:window on:keydown={handleKeydown} />
 
 <div class="absolute top-10 left-0 right-0">
-  <div class="flex justify-center gap-2">
-    <button class="button" on:click={() => undo()}>Undo</button>
-    <button class="button" on:click={() => reset()}>Reset</button>
-  </div>
+  {#if !autoMatrix}
+    <div class="flex justify-center gap-2">
+      <button class="button" on:click={() => undo()}>Undo</button>
+      <button class="button" on:click={() => reset()}>Reset</button>
+    </div>
+  {/if}
   {#if !activeKey}
     <div>
       <div class="flex items-center">

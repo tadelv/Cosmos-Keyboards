@@ -1,5 +1,13 @@
+import type { CuttleKey } from '$lib/worker/config'
 import { expect, test } from 'bun:test'
-import { dtsFile, raw, yamlFile } from './firmwareHelpers'
+import { defaultMatrix, dtsFile, logicalKeys, raw, yamlFile } from './firmwareHelpers'
+
+const k = (cluster: string, row: number, column: number) =>
+  ({
+    type: 'mx-better',
+    cluster,
+    position: { history: [{ name: 'placeOnMatrix', args: [{ row, column }] }] },
+  }) as unknown as CuttleKey
 
 test('Example DTS', () => {
   const json = {
@@ -163,6 +171,42 @@ test('Overlay generation', () => {
 
   expect(overlayFn2(false)).toBe(overlayFn(false))
   expect(overlayFn2(true)).toBe(overlayFn(true))
+})
+
+test('defaultMatrix: split numbers right columns past the left half', () => {
+  const l00 = k('fingers', 0, 0), l01 = k('fingers', 0, 1), l10 = k('fingers', 1, 0), l11 = k('fingers', 1, 1)
+  const r00 = k('fingers', 0, 0), r01 = k('fingers', 0, 1), r10 = k('fingers', 1, 0), r11 = k('fingers', 1, 1)
+  const geo = {
+    left: { c: { keys: [l00, l01, l10, l11] } },
+    right: { c: { keys: [r00, r01, r10, r11] } },
+  } as any
+  const m = defaultMatrix(geo)
+  // Left occupies columns 0,1; right continues at 2,3 (so col-offset 2 = left column count).
+  expect(m.get(l00)).toEqual([0, 0])
+  expect(m.get(l11)).toEqual([1, 1])
+  expect(m.get(r00)).toEqual([0, 2])
+  expect(m.get(r11)).toEqual([1, 3])
+  // Every (row, col) is unique across the whole keyboard.
+  const seen = new Set(Array.from(m.values()).map(([r, c]) => `${r},${c}`))
+  expect(seen.size).toBe(8)
+})
+
+test('defaultMatrix: a thumb key sharing a column packs into an extra row', () => {
+  const top = k('fingers', 0, 0), bot = k('fingers', 1, 0)
+  const thumb = k('thumbs', 5, 0) // far-down layout row, same column value
+  const geo = { unibody: { c: { keys: [top, bot, thumb] } } } as any
+  const m = defaultMatrix(geo)
+  expect(m.get(top)).toEqual([0, 0])
+  expect(m.get(bot)).toEqual([1, 0])
+  expect(m.get(thumb)).toEqual([2, 0]) // packed as the third row of column 0
+})
+
+test('defaultMatrix: insertion order matches logicalKeys', () => {
+  const l0 = k('fingers', 0, 0), l1 = k('fingers', 1, 0)
+  const r0 = k('fingers', 0, 0), r1 = k('fingers', 1, 0)
+  const geo = { left: { c: { keys: [l0, l1] } }, right: { c: { keys: [r0, r1] } } } as any
+  const m = defaultMatrix(geo)
+  expect(Array.from(m.keys())).toEqual(logicalKeys(geo))
 })
 
 test('Example YAML file', () => {

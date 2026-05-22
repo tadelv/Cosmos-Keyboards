@@ -133,6 +133,41 @@ export function logicalKeys(geo: FullGeometry): CuttleKey[] {
   ).map(k => k.key)
 }
 
+/**
+ * Auto-generate a key matrix from the keyboard's physical layout, for boards
+ * (nice!nano) where there is no peaMK detection step. Each side's matrix keys
+ * are grouped by their layout column; distinct column values densify to local
+ * columns 0..C-1, and within a column keys pack into rows 0..R-1 by layout row.
+ * The right side's columns are offset past the left's so the global transform
+ * stays collision-free and `sideColumnMin(right)` equals the left column count
+ * (the col-offset the right shield applies). Insertion order follows
+ * `logicalKeys` so the transform map and physical layout stay index-aligned.
+ */
+export function defaultMatrix(geo: FullGeometry): Matrix {
+  const assignments = new Map<CuttleKey, [number, number]>()
+  let colBase = 0
+  for (const side of ['left', 'unibody', 'right'] as const) {
+    const g = geo[side]
+    if (!g) continue
+    const keys = g.c.keys.filter(hasPinsInMatrix)
+    const byColumn = new DefaultMap<number, CuttleKey[]>(() => [])
+    for (const k of keys) byColumn.get(getRowColumn(k.position).column).push(k)
+    const columnValues = Array.from(byColumn.keys()).sort((a, b) => a - b)
+    columnValues.forEach((colValue, localCol) => {
+      const colKeys = byColumn.get(colValue)
+        .sort((a, b) => getRowColumn(a.position).row - getRowColumn(b.position).row)
+      colKeys.forEach((key, rowIdx) => assignments.set(key, [rowIdx, colBase + localCol]))
+    })
+    colBase += columnValues.length
+  }
+  const matrix: Matrix = new Map()
+  for (const key of logicalKeys(geo)) {
+    const pos = assignments.get(key)
+    if (pos) matrix.set(key, pos)
+  }
+  return matrix
+}
+
 export function zipPromise(arg: AsyncZippable): Promise<Uint8Array> {
   return new Promise((resolve, reject) => {
     zip(arg, (err, data) => {

@@ -8,6 +8,7 @@
   import ViewerBottom from './lib/viewers/ViewerBottom.svelte'
   import ViewerTiming from './lib/viewers/ViewerTiming.svelte'
   import PeaConfig from './lib/editor/PeaConfig.svelte'
+  import { defaultMatrix } from './lib/firmware/firmwareHelpers'
   import Popover from '$lib/presentation/Popover.svelte'
   import Tooltip from '$lib/presentation/Tooltip.svelte'
   import Icon from '$lib/presentation/Icon.svelte'
@@ -547,7 +548,12 @@
     mode = newMode
   }
 
-  $: hasLemon = (config?.right || config?.unibody)?.microcontroller?.startsWith('lemon')
+  $: firmwareMcu = (config?.right || config?.unibody)?.microcontroller
+  $: hasLemon = firmwareMcu?.startsWith('lemon')
+  $: hasFirmware = hasLemon || firmwareMcu == 'nrfmicro-or-nicenano'
+  // nice!nano has no peaMK detection step, so auto-generate the matrix from the layout.
+  $: autoMatrix =
+    firmwareMcu == 'nrfmicro-or-nicenano' && isRenderable($confError) ? defaultMatrix(geometry) : null
   function switchUC(uc: Exclude<CosmosKeyboard['microcontroller'], null>) {
     $protoConfig.microcontroller = uc
     lemonSwitch = false
@@ -851,8 +857,8 @@
         {:else if viewer == 'top'}
           <ViewerLayout {geometry} {darkMode} conf={config} confError={$confError} />
         {:else if viewer == 'programming'}
-          {#if hasLemon}
-            <ViewerPea {geometry} confError={$confError} bind:fullMatrix />
+          {#if hasFirmware}
+            <ViewerPea {geometry} confError={$confError} {autoMatrix} bind:fullMatrix />
           {:else}
             <ViewerMatrix {geometry} {darkMode} confError={$confError} />
           {/if}
@@ -962,7 +968,7 @@
     <div class="xs:w-80 md:w-[32rem]">
       {#if viewer == 'programming'}
         <button class="infobutton" on:click={() => (kleView = true)}>Download KLE Layout</button>
-        {#if flags.lemons && !hasLemon}
+        {#if flags.lemons && !hasFirmware}
           <button
             class="relative bg-teal-500/10 hover:bg-teal-500/30 rounded mt-8 px-4 py-2 ml--2 text-start"
             on:click={() => (lemonSwitch = true)}
@@ -984,7 +990,7 @@
             </div></button
           >
         {/if}
-        {#if hasLemon}
+        {#if hasFirmware}
           {#if fullMatrix}
             <PeaConfig {config} {geometry} matrix={fullMatrix} />
           {:else}
