@@ -5,12 +5,14 @@ import { filterObj, findIndexIter, mapObjNotNull, mapObjNotNullToObj, mapObjToOb
 import { strToU8, zip } from 'fflate'
 import type { FullGeometry } from '../viewers/viewer3dHelpers'
 import { dtsFile, encoderKeys, fullLayout, logicalKeys, type Matrix, raw, yamlFile } from './firmwareHelpers'
+import { lemonWirelessBoard, niceNanoBoard, type ZMKBoard } from './zmkBoards'
 
 const RE_PID_VID = /^0x[0-9A-Fa-f]{4}$/
 
 interface ZMKPeripherals {
   pmw3610: boolean
   cirque: boolean
+  azoteq: boolean
   encoder: boolean
 }
 
@@ -22,6 +24,7 @@ export interface ZMKOptions {
   yourName: string
   diodeDirection: 'COL2ROW' | 'ROW2COL'
   centralSide: 'left' | 'right'
+  board: 'lemon-wireless' | 'nicenano'
   peripherals: {
     left: ZMKPeripherals
     right: ZMKPeripherals
@@ -36,6 +39,10 @@ export interface ZMKOptions {
 export function validateConfig(options: ZMKOptions) {
   if (!RE_PID_VID.test(options.vid)) return 'VID should be of form 0xaaaa'
   if (!RE_PID_VID.test(options.pid)) return 'PID should be of form 0xaaaa'
+}
+
+function boardProfile(options: ZMKOptions): ZMKBoard {
+  return options.board == 'nicenano' ? niceNanoBoard : lemonWirelessBoard
 }
 
 const CHARS = {
@@ -151,12 +158,6 @@ function generateKeycodes(config: FullGeometry, matrix: Matrix, options: ZMKOpti
   return keycodes
 }
 
-/** Returns the board name used for the given config */
-function boardName(options: ZMKOptions) {
-  if (options.wirelessVersion == 'v0.4') return 'cosmos_lemon_wireless_v4'
-  return 'cosmos_lemon_wireless'
-}
-
 function generateEncoderMap(encodersPerSide: Record<keyof FullGeometry, number>) {
   const numEncoders = sum(Object.values(encodersPerSide).map(s => Math.min(s, 1)))
   return new Array(numEncoders).fill('&inc_dec_kp C_VOL_UP C_VOL_DN').join(' ')
@@ -221,7 +222,7 @@ function generateBuildYaml(config: FullGeometry, options: ZMKOptions): string {
     include: config.unibody
       ? [
         {
-          board: boardName(options),
+          board: boardProfile(options).boardId(options),
           shield: shieldList(`${options.folderName}`, options.peripherals.unibody),
           snippet: snippets.join(';'),
           'cmake-args': options.enableStudio ? '-DCONFIG_ZMK_STUDIO=y' : undefined,
@@ -229,13 +230,13 @@ function generateBuildYaml(config: FullGeometry, options: ZMKOptions): string {
       ]
       : [
         {
-          board: boardName(options),
+          board: boardProfile(options).boardId(options),
           shield: shieldList(`${options.folderName}_left`, options.peripherals.left),
           snippet: options.centralSide == 'left' ? snippets.join(';') : undefined,
           'cmake-args': options.centralSide == 'left' && options.enableStudio ? '-DCONFIG_ZMK_STUDIO=y' : undefined,
         },
         {
-          board: boardName(options),
+          board: boardProfile(options).boardId(options),
           shield: shieldList(`${options.folderName}_right`, options.peripherals.right),
           snippet: options.centralSide == 'right' ? snippets.join(';') : undefined,
           'cmake-args': options.centralSide == 'right' && options.enableStudio ? '-DCONFIG_ZMK_STUDIO=y' : undefined,
@@ -597,7 +598,7 @@ export function downloadZMKCode(config: FullGeometry, matrix: Matrix, options: Z
       'config/deps.yml': strToU8(generateDepsYaml()),
       'config/west.yml': strToU8(generateWestYaml()),
       [`boards/shields/${folderName}`]: {
-        [`boards/${boardName(options)}.overlay`]: strToU8(BOARD_OVERLAY),
+        [`boards/${boardProfile(options).boardId(options)}.overlay`]: strToU8(BOARD_OVERLAY),
         'Kconfig.defconfig': strToU8(generateDefconfig(config, options)),
         'Kconfig.shield': strToU8(generateShield(config, options)),
         [folderName + '.dtsi']: strToU8(generateDTSI(config, matrix, options)),
