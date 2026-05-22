@@ -29,20 +29,35 @@
     enableStudio: true,
     wiredVersion: 'v0.4',
     wirelessVersion: 'v0.3',
+    board: 'lemon-wireless',
   })
+
+  $: anyConfig = config.right || config.unibody || { microcontroller: undefined }
+  $: zmkBoard = (anyConfig.microcontroller == 'nrfmicro-or-nicenano' ? 'nicenano' : 'lemon-wireless') as
+    | 'nicenano'
+    | 'lemon-wireless'
+
   $: fullOptions = {
     ...$options,
+    board: zmkBoard,
     keyboardName: $modelName,
     folderName: $modelName.toLowerCase().replace(/[^0-9a-z_/]/g, ''),
     peripherals: mapObjNotNull(config, (c) => ({
       pmw3610: c.keys.some((k) => k.type == 'trackball' && k.variant.sensor == 'Skree (ZMK)'),
       cirque: c.keys.some((k) => k.type == 'trackpad-cirque'),
+      azoteq: c.keys.some((k) => k.type == 'trackpad-azoteq'),
       encoder: !!encoderKeys(c).length,
     })),
   } satisfies Partial<QMKOptions | ZMKOptions>
 
-  $: anyConfig = config.right || config.unibody || { microcontroller: undefined }
   $: truncated = anyConfig.microcontroller == 'lemon-wireless' && $modelName.length > 16
+
+  $: trackpadSide = config.left?.keys.some((k) => k.type == 'trackpad-azoteq')
+    ? 'left'
+    : config.right?.keys.some((k) => k.type == 'trackpad-azoteq')
+    ? 'right'
+    : undefined
+  $: trackpadOnPeripheral = !!config.right && !!trackpadSide && trackpadSide != $options.centralSide
 </script>
 
 <p class="mt-4 mb-2">Successfully made the matrix!</p>
@@ -156,6 +171,47 @@
       assignment after entering studio.
     </InfoBox>
   {/if}
+{/if}
+{#if anyConfig.microcontroller == 'nrfmicro-or-nicenano'}
+  <Field name="Diode Direction" icon="diode-direction">
+    <Select bind:value={$options.diodeDirection}>
+      <option value="ROW2COL">ROW2COL</option>
+      <option value="COL2ROW">COL2ROW</option>
+    </Select>
+  </Field>
+  <Field name="Central (Plug into PC) Side" icon="pc">
+    <Select bind:value={$options.centralSide}>
+      <option value="left">Left</option>
+      <option value="right">Right</option>
+    </Select>
+  </Field>
+  <Field name="Enable ZMK Studio" icon="studio">
+    <Checkbox bind:value={$options.enableStudio} />
+  </Field>
+  <Field name="Enable USB Logging" icon="debug" help="Writes debug information to a USB serial port">
+    <Checkbox bind:value={$options.enableConsole} />
+  </Field>
+
+  {#if trackpadOnPeripheral}
+    <InfoBox class="mt-4">
+      Your trackpad is on the {trackpadSide} half, but the central side is set to {$options.centralSide}.
+      Put the trackpad on the central side (or switch the central side) — pointer input is not yet
+      forwarded from the peripheral half.
+    </InfoBox>
+  {/if}
+
+  <button class="button" on:click={() => downloadZMKCode(geometry, matrix, fullOptions)}>
+    Download ZMK code
+  </button>
+
+  <div class="mt-4 text-gray-500 dark:text-gray-200">
+    Matrix and trackpad pins are auto-assigned to nice!nano pins. After downloading, open
+    <code class="font-mono text-0.9em">{$modelName.toLowerCase()}.dtsi</code> for the pin list to solder
+    against. Read the
+    <a class="text-pink-600 underline" href="{base}/docs/firmware/" target="_blank"
+      >Firmware Autogen documentation</a
+    >.
+  </div>
 {/if}
 
 <style>
