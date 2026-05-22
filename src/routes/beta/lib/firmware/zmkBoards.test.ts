@@ -89,7 +89,7 @@ test('lemonWirelessBoard keeps fixed 14x7 transform dims regardless of matrix', 
 })
 
 test('lemonWirelessBoard kscan is the 595-shifter node', () => {
-  const node = lemonWirelessBoard.kscanNode(new Map(), { diodeDirection: 'COL2ROW' } as any)
+  const node = lemonWirelessBoard.kscanNode({ rows: 7, columns: 14 }, { diodeDirection: 'COL2ROW' } as any)
   expect(node.compatible).toBe('zmk,kscan-gpio-matrix')
   expect(node.colGpios).toEqual([
     '<&shifter 0 GPIO_ACTIVE_HIGH>',
