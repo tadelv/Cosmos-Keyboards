@@ -1,20 +1,7 @@
-import { expect, test } from 'bun:test'
 import type { CuttleKey } from '$lib/worker/config'
-import type { Matrix } from './firmwareHelpers'
+import { expect, test } from 'bun:test'
+import { dtsFile, type Matrix } from './firmwareHelpers'
 import { assignNiceNanoPins, matrixDims, NICENANO_PIN_ORDER, niceNanoKscanNode } from './zmkBoards'
-
-// Minimal inline DTS serializer to avoid importing firmwareHelpers (which pulls
-// in $lib/* modules that require the SvelteKit build context to resolve).
-function camelToKebab(s: string) { return s.replace(/[A-Z]/g, l => '-' + l.toLowerCase()) }
-function dtsVal(v: any): string {
-  if (typeof v === 'string') return v.startsWith('&') || v.startsWith('<') ? v : `"${v}"`
-  if (Array.isArray(v)) return v.join(', ')
-  if (typeof v === 'object') return '{\n' + Object.entries(v).map(([k, val]) => `    ${camelToKebab(k)} = ${dtsVal(val)};`).join('\n') + '\n}'
-  return String(v)
-}
-function dtsFile(obj: Record<string, any>): string {
-  return Object.entries(obj).map(([k, v]) => `${k} ${dtsVal(v)}`).join('\n')
-}
 
 const key = () => ({} as unknown as CuttleKey)
 
