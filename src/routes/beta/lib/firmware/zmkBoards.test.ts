@@ -1,7 +1,7 @@
 import type { CuttleKey } from '$lib/worker/config'
 import { expect, test } from 'bun:test'
 import { dtsFile, type Matrix } from './firmwareHelpers'
-import { assignNiceNanoPins, matrixDims, NICENANO_PIN_ORDER, niceNanoKscanNode } from './zmkBoards'
+import { assignNiceNanoPins, lemonWirelessBoard, matrixDims, NICENANO_PIN_ORDER, niceNanoKscanNode } from './zmkBoards'
 
 const key = () => ({} as unknown as CuttleKey)
 
@@ -75,4 +75,28 @@ test('niceNanoKscanNode renders through dtsFile without raw gpio refs', () => {
   expect(out).toContain('&pro_micro 2')
   expect(out).not.toContain('&gpio0')
   expect(out).not.toContain('595')
+})
+
+test('lemonWirelessBoard id depends on wireless version', () => {
+  expect(lemonWirelessBoard.boardId({ wirelessVersion: 'v0.3' } as any)).toBe('cosmos_lemon_wireless')
+  expect(lemonWirelessBoard.boardId({ wirelessVersion: 'v0.4' } as any)).toBe('cosmos_lemon_wireless_v4')
+})
+
+test('lemonWirelessBoard keeps fixed 14x7 transform dims regardless of matrix', () => {
+  expect(lemonWirelessBoard.transformDims(new Map())).toEqual({ columns: 14, rows: 7 })
+})
+
+test('lemonWirelessBoard kscan is the 595-shifter node', () => {
+  const node = lemonWirelessBoard.kscanNode(new Map(), { diodeDirection: 'COL2ROW' } as any)
+  expect(node.compatible).toBe('zmk,kscan-gpio-matrix')
+  expect(node.colGpios).toEqual([
+    '<&shifter 0 GPIO_ACTIVE_HIGH>',
+    '<&shifter 1 GPIO_ACTIVE_HIGH>',
+    '<&shifter 2 GPIO_ACTIVE_HIGH>',
+    '<&shifter 3 GPIO_ACTIVE_HIGH>',
+    '<&shifter 4 GPIO_ACTIVE_HIGH>',
+    '<&shifter 5 GPIO_ACTIVE_HIGH>',
+    '<&shifter 6 GPIO_ACTIVE_HIGH>',
+  ])
+  expect(node.rowGpios.length).toBe(7)
 })
