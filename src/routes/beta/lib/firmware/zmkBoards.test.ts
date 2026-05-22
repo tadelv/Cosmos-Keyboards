@@ -32,12 +32,13 @@ test('assignNiceNanoPins without trackpad: rows then cols', () => {
   })
 })
 
-test('assignNiceNanoPins with trackpad reserves reset+rdy first', () => {
+test('assignNiceNanoPins with trackpad reserves reset+rdy and excludes I2C pins 2,3', () => {
+  // Pins 2 (SDA) and 3 (SCL) are removed; reset/rdy take 0,1; rows/cols continue from 4.
   expect(assignNiceNanoPins({ rows: 2, cols: 3, trackpad: true })).toEqual({
     resetPin: 0,
     rdyPin: 1,
-    rowPins: [2, 3],
-    colPins: [4, 5, 6],
+    rowPins: [4, 5],
+    colPins: [6, 7, 8],
   })
 })
 

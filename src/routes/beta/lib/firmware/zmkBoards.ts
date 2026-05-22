@@ -34,6 +34,14 @@ export function sideColumnSpan(matrix: Matrix, sideKeys: ReadonlyArray<unknown>)
 
 export const NICENANO_PIN_ORDER = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 14, 15, 16, 18, 19, 20, 21]
 
+/**
+ * The `pro_micro_i2c` (= &i2c0) bus is fixed by the board to these pro_micro
+ * pins: SDA = D2 (P0.17), SCL = D3 (P0.20). When a trackpad is present they are
+ * dedicated to I2C and must be excluded from the matrix/reset/rdy pool.
+ */
+export const NICENANO_I2C_SDA = 2
+export const NICENANO_I2C_SCL = 3
+
 export interface NiceNanoPins {
   rowPins: number[]
   colPins: number[]
@@ -44,7 +52,7 @@ export interface NiceNanoPins {
 export function assignNiceNanoPins(
   { rows, cols, trackpad }: { rows: number; cols: number; trackpad: boolean },
 ): NiceNanoPins {
-  const pool = [...NICENANO_PIN_ORDER]
+  const pool = NICENANO_PIN_ORDER.filter(p => !trackpad || (p !== NICENANO_I2C_SDA && p !== NICENANO_I2C_SCL))
   const take = (n: number) => {
     if (pool.length < n) throw new Error(`Not enough nice!nano GPIO pins: need ${n} more, ${pool.length} left`)
     return pool.splice(0, n)
