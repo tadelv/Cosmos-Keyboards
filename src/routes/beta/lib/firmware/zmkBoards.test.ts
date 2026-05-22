@@ -1,7 +1,7 @@
 import type { CuttleKey } from '$lib/worker/config'
 import { expect, test } from 'bun:test'
 import { dtsFile, type Matrix } from './firmwareHelpers'
-import { assignNiceNanoPins, lemonWirelessBoard, matrixDims, NICENANO_PIN_ORDER, niceNanoKscanNode } from './zmkBoards'
+import { assignNiceNanoPins, lemonWirelessBoard, matrixDims, NICENANO_PIN_ORDER, niceNanoBoard, niceNanoKscanNode } from './zmkBoards'
 
 const key = () => ({} as unknown as CuttleKey)
 
@@ -99,4 +99,20 @@ test('lemonWirelessBoard kscan is the 595-shifter node', () => {
     '<&shifter 6 GPIO_ACTIVE_HIGH>',
   ])
   expect(node.rowGpios.length).toBe(7)
+})
+
+test('niceNanoBoard uses upstream nice_nano_v2', () => {
+  expect(niceNanoBoard.boardId({} as any)).toBe('nice_nano_v2')
+})
+
+test('niceNanoBoard derives transform dims from the matrix', () => {
+  const m: Matrix = new Map([[key(), [0, 0]], [key(), [2, 5]]])
+  expect(niceNanoBoard.transformDims(m)).toEqual({ rows: 3, columns: 6 })
+})
+
+test('niceNanoBoard kscan reflects diode direction and trackpad reservation', () => {
+  const m: Matrix = new Map([[key(), [0, 0]]])
+  const node = niceNanoBoard.kscanNode(m, { diodeDirection: 'COL2ROW', peripherals: { unibody: { azoteq: false } } } as any)
+  expect(node.rowGpios).toEqual(['<&pro_micro 0 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>'])
+  expect(node.colGpios).toEqual(['<&pro_micro 1 GPIO_ACTIVE_HIGH>'])
 })

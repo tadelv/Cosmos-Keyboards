@@ -56,6 +56,20 @@ export interface ZMKBoard {
   kscanNode(matrix: Matrix, options: ZMKOptions): { compatible: string; diodeDirection: string; rowGpios: string[]; colGpios: string[] }
 }
 
+function anyAzoteq(options: ZMKOptions): boolean {
+  return Object.values(options.peripherals).some((p: any) => p.azoteq)
+}
+
+export const niceNanoBoard: ZMKBoard = {
+  boardId: () => 'nice_nano_v2',
+  transformDims: (matrix) => matrixDims(matrix),
+  kscanNode: (matrix, options) => {
+    const { rows, columns } = matrixDims(matrix)
+    const pins = assignNiceNanoPins({ rows, cols: columns, trackpad: anyAzoteq(options) })
+    return niceNanoKscanNode(pins, options.diodeDirection)
+  },
+}
+
 export const lemonWirelessBoard: ZMKBoard = {
   boardId: (o) => o.wirelessVersion == 'v0.4' ? 'cosmos_lemon_wireless_v4' : 'cosmos_lemon_wireless',
   transformDims: () => ({ columns: 14, rows: 7 }),
