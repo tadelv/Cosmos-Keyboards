@@ -17,22 +17,16 @@
 
   let activeIndex = 0
   $: possibleKeys = logicalKeys(geometry).filter(hasPinsInMatrix)
-  $: activeKey = possibleKeys[activeIndex]
+  /** When provided (nice!nano), the matrix is auto-generated, not captured via peaMK. */
+  export let autoMatrix: Map<CuttleKey, [number, number]> | null = null
+  // No interactive capture in auto mode, so there's no active key to step through.
+  $: activeKey = autoMatrix ? undefined : possibleKeys[activeIndex]
   let matrices = new Map<CuttleKey, [number, number]>()
   let matrixState: [typeof matrices, number] = [matrices, 0]
   export let fullMatrix: typeof matrices | null
-  /** When provided (nice!nano), the matrix is auto-generated, not captured via peaMK. */
-  export let autoMatrix: Map<CuttleKey, [number, number]> | null = null
-  $: fullMatrix = activeKey ? null : matrices
-
-  // Pre-fill from the auto-generated matrix and mark every key done, skipping capture.
-  $: if (autoMatrix) loadAutoMatrix(autoMatrix, possibleKeys.length)
-  function loadAutoMatrix(am: Map<CuttleKey, [number, number]>, count: number) {
-    matrices = am
-    matrixState = [am, 1]
-    activeIndex = count
-  }
-  $: repeatedMatrices = repeated(Array.from(matrixState[0].values()).map((v) => v.join(',')))
+  $: fullMatrix = autoMatrix ? autoMatrix : activeKey ? null : matrices
+  $: displayMatrix = autoMatrix ?? matrixState[0]
+  $: repeatedMatrices = repeated(Array.from(displayMatrix.values()).map((v) => v.join(',')))
 
   $: centers = fullEstimatedCenter(geometry, false)
   $: center = centers[$view]
@@ -136,7 +130,7 @@
           {#each geo.allKeyCriticalPoints2D as p, i}
             {@const active = geo.c.keys[i] == activeKey}
             {@const hasMatrix = hasPinsInMatrix(geo.c.keys[i])}
-            {@const mat = matrixState[0].get(geo.c.keys[i])}
+            {@const mat = displayMatrix.get(geo.c.keys[i])}
             {@const bm = !activeKey && isBootmagic(kbd, mat)}
             {@const rep = mat && repeatedMatrices.includes(mat.join(','))}
             {@const meshColor = active
@@ -157,7 +151,7 @@
           {/each}
           {#each geo.keyHolesTrsfs2D.flat().map((k) => k.xyz()) as p, i}
             {@const key = geo.c.keys[i]}
-            {@const mat = matrixState[0].get(key)}
+            {@const mat = displayMatrix.get(key)}
             <HTML position={[p[0], p[1], 0]} center>
               <div class="leading-none text-center">
                 {(hasKeyGeometry(key) && 'keycap' in key && key.keycap?.letter) || ' '}

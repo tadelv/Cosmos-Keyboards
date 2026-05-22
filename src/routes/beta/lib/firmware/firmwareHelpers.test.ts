@@ -9,6 +9,13 @@ const k = (cluster: string, row: number, column: number) =>
     position: { history: [{ name: 'placeOnMatrix', args: [{ row, column }] }] },
   }) as unknown as CuttleKey
 
+const kSphere = (row: number, angle: number) =>
+  ({
+    type: 'mx-better',
+    cluster: 'thumbs',
+    position: { history: [{ name: 'placeOnSphere', args: [{ row, angle }] }] },
+  }) as unknown as CuttleKey
+
 test('Example DTS', () => {
   const json = {
     [raw()]: '#include <behaviors.dtsi>',
@@ -191,14 +198,31 @@ test('defaultMatrix: split numbers right columns past the left half', () => {
   expect(seen.size).toBe(8)
 })
 
-test('defaultMatrix: a thumb key sharing a column packs into an extra row', () => {
-  const top = k('fingers', 0, 0), bot = k('fingers', 1, 0)
-  const thumb = k('thumbs', 5, 0) // far-down layout row, same column value
-  const geo = { unibody: { c: { keys: [top, bot, thumb] } } } as any
+test('defaultMatrix: a key in the same column packs into an extra row', () => {
+  const top = k('fingers', 0, 0), bot = k('fingers', 1, 0), extra = k('fingers', 5, 0)
+  const geo = { unibody: { c: { keys: [top, bot, extra] } } } as any
   const m = defaultMatrix(geo)
   expect(m.get(top)).toEqual([0, 0])
   expect(m.get(bot)).toEqual([1, 0])
-  expect(m.get(thumb)).toEqual([2, 0]) // packed as the third row of column 0
+  expect(m.get(extra)).toEqual([2, 0]) // packed as the third row of column 0
+})
+
+test('defaultMatrix: off-grid thumb keys pack into existing columns, not new ones', () => {
+  // Two finger columns (2 rows each); three sphere-placed thumbs must not create
+  // their own columns (which would blow the nice!nano pin budget).
+  const g00 = k('fingers', 0, 0), g10 = k('fingers', 1, 0), g01 = k('fingers', 0, 1), g11 = k('fingers', 1, 1)
+  const t0 = kSphere(0, 10), t1 = kSphere(0, 20), t2 = kSphere(0, 30)
+  const geo = { unibody: { c: { keys: [g00, g10, g01, g11, t0, t1, t2] } } } as any
+  const m = defaultMatrix(geo)
+  // Only columns 0 and 1 exist.
+  const cols = new Set(Array.from(m.values()).map(([, c]) => c))
+  expect(cols).toEqual(new Set([0, 1]))
+  // Thumbs land in the least-filled column as extra rows, balanced.
+  expect(m.get(t0)).toEqual([2, 0])
+  expect(m.get(t1)).toEqual([2, 1])
+  expect(m.get(t2)).toEqual([3, 0])
+  // Every position stays unique.
+  expect(new Set(Array.from(m.values()).map(p => p.join(','))).size).toBe(7)
 })
 
 test('defaultMatrix: insertion order matches logicalKeys', () => {

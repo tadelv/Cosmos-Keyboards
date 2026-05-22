@@ -135,13 +135,17 @@ export function logicalKeys(geo: FullGeometry): CuttleKey[] {
 
 /**
  * Auto-generate a key matrix from the keyboard's physical layout, for boards
- * (nice!nano) where there is no peaMK detection step. Each side's matrix keys
- * are grouped by their layout column; distinct column values densify to local
- * columns 0..C-1, and within a column keys pack into rows 0..R-1 by layout row.
- * The right side's columns are offset past the left's so the global transform
- * stays collision-free and `sideColumnMin(right)` equals the left column count
- * (the col-offset the right shield applies). Insertion order follows
- * `logicalKeys` so the transform map and physical layout stay index-aligned.
+ * (nice!nano) where there is no peaMK detection step.
+ *
+ * Finger-cluster keys define the columns: their distinct layout-column values
+ * densify to local columns 0..C-1 and pack into rows by layout row. Other-cluster
+ * keys (thumbs, whose layout columns would otherwise each become their own matrix
+ * column and blow the nice!nano pin budget) are packed into the least-filled
+ * existing column as extra rows. The right
+ * side's columns offset past the left's so the global transform stays
+ * collision-free and `sideColumnMin(right)` equals the left column count (the
+ * col-offset the right shield applies). Insertion order follows `logicalKeys`
+ * so the transform map and physical layout stay index-aligned.
  */
 export function defaultMatrix(geo: FullGeometry): Matrix {
   const assignments = new Map<CuttleKey, [number, number]>()
@@ -150,15 +154,32 @@ export function defaultMatrix(geo: FullGeometry): Matrix {
     const g = geo[side]
     if (!g) continue
     const keys = g.c.keys.filter(hasPinsInMatrix)
+    let gridKeys = keys.filter(k => k.cluster == 'fingers')
+    let extraKeys = keys.filter(k => k.cluster != 'fingers')
+    // Fall back to treating every key as a grid key if there is no finger cluster.
+    if (gridKeys.length == 0) [gridKeys, extraKeys] = [keys, []]
+
     const byColumn = new DefaultMap<number, CuttleKey[]>(() => [])
-    for (const k of keys) byColumn.get(getRowColumn(k.position).column).push(k)
+    for (const k of gridKeys) byColumn.get(getRowColumn(k.position).column).push(k)
     const columnValues = Array.from(byColumn.keys()).sort((a, b) => a - b)
+    const nextRow = columnValues.map(() => 0)
     columnValues.forEach((colValue, localCol) => {
-      const colKeys = byColumn.get(colValue)
+      byColumn.get(colValue)
         .sort((a, b) => getRowColumn(a.position).row - getRowColumn(b.position).row)
-      colKeys.forEach((key, rowIdx) => assignments.set(key, [rowIdx, colBase + localCol]))
+        .forEach(key => assignments.set(key, [nextRow[localCol]++, colBase + localCol]))
     })
-    colBase += columnValues.length
+    // Pack off-grid keys into the least-filled column so the column count (and
+    // thus the pin count) stays bounded by the grid.
+    for (const key of extraKeys.sort((a, b) => getRowColumn(a.position).row - getRowColumn(b.position).row)) {
+      let localCol = 0
+      for (let c = 1; c < nextRow.length; c++) if (nextRow[c] < nextRow[localCol]) localCol = c
+      if (nextRow.length == 0) { // no grid columns at all: give the key its own column
+        nextRow.push(0)
+        localCol = nextRow.length - 1
+      }
+      assignments.set(key, [nextRow[localCol]++, colBase + localCol])
+    }
+    colBase += nextRow.length
   }
   const matrix: Matrix = new Map()
   for (const key of logicalKeys(geo)) {
