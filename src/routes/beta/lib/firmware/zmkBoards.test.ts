@@ -1,6 +1,7 @@
 import type { CuttleKey } from '$lib/worker/config'
 import { expect, test } from 'bun:test'
 import { dtsFile, type Matrix } from './firmwareHelpers'
+import { generateDTSI } from './zmk'
 import { assignNiceNanoPins, lemonWirelessBoard, matrixDims, NICENANO_PIN_ORDER, niceNanoBoard, niceNanoKscanNode } from './zmkBoards'
 
 const key = () => ({} as unknown as CuttleKey)
@@ -115,4 +116,33 @@ test('niceNanoBoard kscan reflects diode direction and trackpad reservation', ()
   const node = niceNanoBoard.kscanNode(m, { diodeDirection: 'COL2ROW', peripherals: { unibody: { azoteq: false } } } as any)
   expect(node.rowGpios).toEqual(['<&pro_micro 0 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>'])
   expect(node.colGpios).toEqual(['<&pro_micro 1 GPIO_ACTIVE_HIGH>'])
+})
+
+const dtsiOpts = {
+  board: 'lemon-wireless',
+  diodeDirection: 'COL2ROW',
+  folderName: 'kb',
+  underGlowAtStart: true,
+  wirelessVersion: 'v0.3',
+  peripherals: { left: { azoteq: false }, right: { azoteq: false }, unibody: { azoteq: false } },
+} as any
+const dtsiGeo = { left: { c: { keys: [] } }, right: { c: { keys: [] } } } as any
+const dtsiMatrix: Matrix = new Map([[key(), [0, 0]], [key(), [6, 13]]])
+
+test('Lemon DTSI keeps shifter cols and 14x7 transform', () => {
+  const out = generateDTSI(dtsiGeo, dtsiMatrix, dtsiOpts)
+  expect(out).toContain('zmk,gpio-595')
+  expect(out).toContain('columns = <14>')
+  expect(out).toContain('rows = <7>')
+})
+
+test('nice!nano DTSI emits pro_micro matrix, no shifter', () => {
+  // Use a small matrix (2 rows x 3 cols = 5 pins) that fits within nice!nano's 18 available pins
+  const smallMatrix: Matrix = new Map([[key(), [0, 0]], [key(), [1, 2]]])
+  const out = generateDTSI(dtsiGeo, smallMatrix, { ...dtsiOpts, board: 'nicenano', diodeDirection: 'ROW2COL' })
+  expect(out).toContain('&pro_micro')
+  expect(out).toContain('diode-direction = "row2col"')
+  expect(out).not.toContain('zmk,gpio-595')
+  expect(out).toContain('columns = <3>') // matrix max col 2 + 1
+  expect(out).toContain('rows = <2>') // matrix max row 1 + 1
 })

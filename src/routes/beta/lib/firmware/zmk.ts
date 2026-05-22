@@ -341,17 +341,8 @@ function generateConf(config: FullGeometry, options: ZMKOptions) {
   ].join('\n') + '\n'
 }
 
-function generateDTSI(config: FullGeometry, matrix: Matrix, options: ZMKOptions) {
-  const activeMode = options.diodeDirection == 'COL2ROW' ? 'GPIO_ACTIVE_HIGH' : 'GPIO_ACTIVE_LOW'
-  const pullMode = options.diodeDirection == 'COL2ROW' ? 'GPIO_PULL_DOWN' : 'GPIO_PULL_UP'
-  const encoders = mapObjNotNull(config, (g) => encoderKeys(g.c))
-  const encodersWithLength = filterObj(encoders, (k, v) => v.length > 0)
-
-  return dtsFile({
-    [raw()]: '#include <behaviors.dtsi>',
-    [raw()]: '#include <dt-bindings/zmk/matrix_transform.h>',
-    [raw()]: '#include <dt-bindings/zmk/keys.h>',
-    [raw()]: `#include "${options.folderName}-layouts.dtsi"`,
+function lemonSpiPreamble() {
+  return {
     [raw()]: '// Tell VIK that there is 1 other device on the SPI bus.',
     [raw()]: '// You will need to increase this number if you add another SPI device.',
     [raw()]: '#define VIK_SPI_REG_START 1',
@@ -370,6 +361,35 @@ function generateDTSI(config: FullGeometry, matrix: Matrix, options: ZMKOptions)
         '#gpio-cells': 2,
       },
     },
+  }
+}
+
+function lemonExtPowerHog() {
+  return {
+    [raw()]: '// Hack to force-drive the LED power pin high, ensuring LED power is off. Ext power is also disabled in the conf file.',
+    '&gpio0': {
+      'ext_power_hog: ext_power_hog': {
+        'gpio-hog': true,
+        'gpios': ['<2 GPIO_ACTIVE_LOW>'],
+        'output-high': true,
+      },
+    },
+  }
+}
+
+export function generateDTSI(config: FullGeometry, matrix: Matrix, options: ZMKOptions) {
+  const board = boardProfile(options)
+  const dims = board.transformDims(matrix)
+  const isLemon = options.board == 'lemon-wireless'
+  const encoders = mapObjNotNull(config, (g) => encoderKeys(g.c))
+  const encodersWithLength = filterObj(encoders, (k, v) => v.length > 0)
+
+  return dtsFile({
+    [raw()]: '#include <behaviors.dtsi>',
+    [raw()]: '#include <dt-bindings/zmk/matrix_transform.h>',
+    [raw()]: '#include <dt-bindings/zmk/keys.h>',
+    [raw()]: `#include "${options.folderName}-layouts.dtsi"`,
+    ...(isLemon ? lemonSpiPreamble() : {}),
     '/': {
       'chosen': {
         'zmk,kscan': '&kscan0',
@@ -378,32 +398,11 @@ function generateDTSI(config: FullGeometry, matrix: Matrix, options: ZMKOptions)
       },
       'default_transform: keymap_transform_0': {
         compatible: 'zmk,matrix-transform',
-        columns: 14,
-        rows: 7,
+        columns: dims.columns,
+        rows: dims.rows,
         map: '<' + Array.from(matrix.values()).map(([r, c]) => `RC(${r},${c})`).join(' ') + '>',
       },
-      'kscan0: kscan_0': {
-        compatible: 'zmk,kscan-gpio-matrix',
-        diodeDirection: 'col2row',
-        rowGpios: [
-          `<&gpio0 20 (${activeMode} | ${pullMode})>`,
-          `<&gpio0 22 (${activeMode} | ${pullMode})>`,
-          `<&gpio0 24 (${activeMode} | ${pullMode})>`,
-          `<&gpio0 9  (${activeMode} | ${pullMode})>`,
-          `<&gpio0 10 (${activeMode} | ${pullMode})>`,
-          `<&gpio1 13 (${activeMode} | ${pullMode})>`,
-          `<&gpio1 15 (${activeMode} | ${pullMode})>`,
-        ],
-        colGpios: [
-          `<&shifter 0 ${activeMode}>`,
-          `<&shifter 1 ${activeMode}>`,
-          `<&shifter 2 ${activeMode}>`,
-          `<&shifter 3 ${activeMode}>`,
-          `<&shifter 4 ${activeMode}>`,
-          `<&shifter 5 ${activeMode}>`,
-          `<&shifter 6 ${activeMode}>`,
-        ],
-      },
+      'kscan0: kscan_0': board.kscanNode(matrix, options),
       ...mapObjToObj(encodersWithLength, (encoders, side) => ({
         [`${side}_encoder: encoder_${side}`]: {
           compatible: 'alps,ec11',
@@ -423,18 +422,7 @@ function generateDTSI(config: FullGeometry, matrix: Matrix, options: ZMKOptions)
         }
         : {}),
     },
-    ...(!options.underGlowAtStart
-      ? {
-        [raw()]: '// Hack to force-drive the LED power pin high, ensuring LED power is off. Ext power is also disabled in the conf file.',
-        '&gpio0': {
-          'ext_power_hog: ext_power_hog': {
-            'gpio-hog': true,
-            'gpios': ['<2 GPIO_ACTIVE_LOW>'],
-            'output-high': true,
-          },
-        },
-      }
-      : {}),
+    ...(isLemon && !options.underGlowAtStart ? lemonExtPowerHog() : {}),
   })
 }
 
