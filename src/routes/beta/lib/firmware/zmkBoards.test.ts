@@ -216,6 +216,21 @@ test('Azoteq overlay binds iqs5xx@74 on pro_micro_i2c with reset/rdy on pro_micr
   expect(out).toContain('input-listener')
 })
 
+test('nice!nano right overlay nests the trackpad input-listener inside the root node', () => {
+  const tk = () => ({ type: 'trackpad-azoteq' } as unknown as CuttleKey)
+  const R0 = tk()
+  const m: Matrix = new Map([[R0, [0, 0]]])
+  const geo = { right: { c: { keys: [R0] } } } as any
+  const out = generateOverlay(geo, m, { ...dtsiOpts, board: 'nicenano' }, 'right')
+  expect(out).toContain('input-listener')
+  // The listener is a plain node: it MUST be indented under `/`, never dangling
+  // at file top level (a bare `node {}` at root is a DTS parse error).
+  expect(out).toMatch(/^\s+trackpad_input: trackpad_input/m)
+  expect(out).not.toMatch(/^trackpad_input: trackpad_input/m)
+  // The bootloader node it shares the root block with must survive the merge.
+  expect(out).toContain('boot-magic-key')
+})
+
 test('asymmetric split: right col-offset is the right half min global column', () => {
   const sk = () => ({ type: 'mx-better' } as unknown as CuttleKey)
   const L0 = sk(), L1 = sk(), L2 = sk(), R0 = sk()

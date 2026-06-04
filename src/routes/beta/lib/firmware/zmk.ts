@@ -528,9 +528,13 @@ export function generateAzoteqOverlay(): object {
   // (0, 1) regardless of matrix size, so no matrix dims are required here.
   const pins = assignNiceNanoPins({ rows: 0, cols: 0, trackpad: true })
   return {
-    'trackpad_input: trackpad_input': {
-      compatible: 'zmk,input-listener',
-      device: '<&trackpad>',
+    // The input-listener is a plain node, so it must live under the root node
+    // (`/`). The caller merges this into the shield's existing root block.
+    '/': {
+      'trackpad_input: trackpad_input': {
+        compatible: 'zmk,input-listener',
+        device: '<&trackpad>',
+      },
     },
     '&pro_micro_i2c': {
       status: 'okay',
@@ -572,6 +576,11 @@ export function generateOverlay(config: FullGeometry, matrix: Matrix, options: Z
 
   const hasAzoteq = options.board == 'nicenano' && !!config[side] && config[side]!.c.keys.some(k => k.type == 'trackpad-azoteq')
 
+  // The Azoteq overlay contributes both a root-node block (the input-listener)
+  // and reference-override blocks (`&pro_micro_i2c`). Split them apart so the
+  // root-node block merges into this shield's `/` instead of replacing it.
+  const { '/': azoteqRoot, ...azoteqRefs } = hasAzoteq ? generateAzoteqOverlay() as Record<string, object> : {}
+
   return dtsFile({
     [raw()]: `#include "${options.folderName}.dtsi"`,
     '/': {
@@ -580,6 +589,7 @@ export function generateOverlay(config: FullGeometry, matrix: Matrix, options: Z
         keyPosition: bootloaderPosition,
         jumpToBootloader: true,
       },
+      ...azoteqRoot,
     },
     '&default_transform': right && {
       colOffset,
@@ -591,7 +601,7 @@ export function generateOverlay(config: FullGeometry, matrix: Matrix, options: Z
         },
       }
       : {}),
-    ...(hasAzoteq ? generateAzoteqOverlay() : {}),
+    ...azoteqRefs,
   })
 }
 
